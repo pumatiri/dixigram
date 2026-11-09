@@ -1,0 +1,735 @@
+<script>
+'use strict';
+
+/* =========================================================================
+   DIXIGRAM — Quiz UI
+   File: QuizUI.html
+   ========================================================================= */
+
+var DIXI_QUIZ_TIMER = null;
+
+function beginQuiz(track, moduleId) {
+  if (!track || !moduleId) return;
+  stopQuizTimer();
+  DIXI_STATE.quiz = null;
+  DIXI_STATE.pendingQuiz = { track: track, moduleId: moduleId };
+  navigateTo('#/quiz');
+}
+
+function renderQuizRoute() {
+  var app = document.getElementById('app');
+  if (!app) return;
+
+  if (DIXI_STATE.quiz && DIXI_STATE.quiz.results) {
+    stopQuizTimer();
+    app.innerHTML = renderQuizShell(renderQuizResult(), { progress: false, timerLabel: 'Selesai' });
+    initResultAnimations();
+    return;
+  }
+
+  if (DIXI_STATE.quiz && DIXI_STATE.quiz.error) {
+    stopQuizTimer();
+    app.innerHTML = renderQuizShell(renderQuizError(), { progress: false, timerLabel: 'Gagal dimuat' });
+    return;
+  }
+
+  if (DIXI_STATE.quiz && DIXI_STATE.quiz.finishing) {
+    stopQuizTimer();
+    app.innerHTML = renderQuizShell(
+      quizLoadingHTML('Menghitung hasil…', isGuest() ? 'Menyimpan hasil di perangkat ini.' : 'Menyimpan XP dan progress ke akunmu.'),
+      { progress: false, timerLabel: 'Menyimpan' }
+    );
+    return;
+  }
+
+  if (DIXI_STATE.quiz && DIXI_STATE.quiz.loading) {
+    app.innerHTML = renderQuizShell(
+      quizLoadingHTML('Menyiapkan soal…', 'Mengacak ' + (getConfig().quizSize || 6) + ' soal dari bank modul.'),
+      { progress: false, timerLabel: 'Menyiapkan' }
+    );
+    return;
+  }
+
+  if (DIXI_STATE.quiz && DIXI_STATE.quiz.questions) {
+    app.innerHTML = renderQuizActive();
+    startQuizTimer();
+    focusQuizInput();
+    return;
+  }
+
+  if (DIXI_STATE.pendingQuiz) {
+    var pending = DIXI_STATE.pendingQuiz;
+    app.innerHTML = renderQuizShell(
+      quizLoadingHTML('Menyiapkan soal…', 'Mengacak ' + (getConfig().quizSize || 6) + ' soal dari bank modul.'),
+      { progress: false, timerLabel: 'Menyiapkan' }
+    );
+    startQuizRequest(pending.track, pending.moduleId);
+    return;
+  }
+
+  app.innerHTML = renderQuizShell(renderQuizError('Tidak ada latihan aktif. Pilih modul untuk memulai.'), { progress: false, timerLabel: 'Kosong' });
+}
+
+function quizLoadingHTML(title, sub) {
+  return '<div class="quiz-loading" role="status"><span class="spinner"></span><div><strong>' + esc(title) + '</strong>' +
+    '<div class="quiz-loading-sub">' + esc(sub) + '</div></div></div>';
+}
+
+function startQuizRequest(track, moduleId) {
+  if (DIXI_STATE.quiz && DIXI_STATE.quiz.loading &&
+      DIXI_STATE.quiz.track === track && DIXI_STATE.quiz.moduleId === moduleId) {
+    return;
+  }
+
+  DIXI_STATE.quiz = {
+    track: track,
+    moduleId: moduleId,
+    loading: true,
+    error: '',
+    questions: null
+  };
+
+  apiCall('apiStartQuiz', DIXI_STATE.token, track, moduleId)
+    .then(function (data) {
+      if (DIXI_STATE.route.name !== 'quiz') return;
+      if (!DIXI_STATE.pendingQuiz ||
+          DIXI_STATE.pendingQuiz.track !== track ||
+          DIXI_STATE.pendingQuiz.moduleId !== moduleId) return;
+
+      DIXI_STATE.pendingQuiz = null;
+      if (data.token) {
+        DIXI_STATE.token = data.token;
+        writeToken(data.token);
+      }
+      if (data.quota) setQuota(data.quota);
+      DIXI_STATE.quiz = {
+        track: track,
+        moduleId: moduleId,
+        attemptId: data.attemptId,
+        module: data.module,
+        questions: data.questions,
+        total: data.total,
+        quota: data.quota,
+        xpRules: data.xpRules,
+        passScore: data.passScore,
+        index: 0,
+        selected: null,
+        input: '',
+        answers: {},
+        submitting: false,
+        finishing: false,
+        loading: false,
+        error: '',
+        startedAt: Date.now(),
+        results: null
+      };
+      renderQuizRoute();
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    })
+    .catch(function (err) {
+      if (DIXI_STATE.route.name !== 'quiz') return;
+      DIXI_STATE.pendingQuiz = null;
+      DIXI_STATE.quiz = {
+        track: track,
+        moduleId: moduleId,
+        loading: false,
+        finishing: false,
+        error: err.message || 'Latihan tidak bisa dimulai.',
+        code: err.code || '',
+        questions: null
+      };
+      renderQuizRoute();
+      if (err.code === 'GUEST_LIMIT') {
+        setTimeout(function () { openUpsell('limit'); }, 120);
+      } else if (err.code === 'PENDING_APPROVAL') {
+        setTimeout(function () { openUpsell('pending'); }, 120);
+      } else if (err.code === 'LOCKED') {
+        setTimeout(function () { openUpsell('locked'); }, 120);
+      } else if (err.code === 'AUTH_REQUIRED') {
+        setTimeout(function () { openAuth('login'); }, 120);
+      }
+    });
+}
+
+/* =========================================================================
+   SHELL
+   ========================================================================= */
+
+function renderQuizShell(content, options) {
+  var opts = options || {};
+  var progress = opts.progress !== false;
+  var q = DIXI_STATE.quiz;
+  var answered = q && q.answers ? Object.keys(q.answers).length : 0;
+  var total = q && q.total ? q.total : 0;
+  var pct = total ? Math.round((answered / total) * 100) : 0;
+  var timerLabel = opts.timerLabel || (q && q.startedAt ? formatDuration(Math.floor((Date.now() - q.startedAt) / 1000)) : '00m 00s');
+
+  return '<div class="quiz-shell">' +
+    '<header class="quiz-topbar">' +
+      '<button class="quiz-brand" type="button" data-action="quiz-exit" aria-label="Keluar dari latihan">' +
+        logoMarkHTML() + '<span class="brand-name">DIXIGRAM</span>' +
+      '</button>' +
+      '<div class="quiz-topbar-center">' +
+        '<span class="quiz-timer">' + icon('clock') + ' <span id="quiz-timer">' + esc(timerLabel) + '</span></span>' +
+        (q && q.questions ? '<span class="chip chip--sm">' + answered + '/' + total + '</span>' : '') +
+      '</div>' +
+      '<button class="btn btn-ghost btn-sm" data-action="quiz-exit">' + icon('x') + ' Keluar</button>' +
+    '</header>' +
+    (progress
+      ? '<div class="quiz-progress-wrap">' +
+          '<div class="quiz-progress-head"><span>Progress latihan</span><span><b>' + answered + '</b> / ' + total + ' soal</span></div>' +
+          '<div class="quiz-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><span style="width:' + pct + '%"></span></div>' +
+        '</div>'
+      : '') +
+    '<div class="quiz-stage">' + content + '</div>' +
+  '</div>';
+}
+
+function renderQuizActive() {
+  var q = DIXI_STATE.quiz;
+  var question = q.questions[q.index];
+  var feedback = q.answers[question.id] || null;
+  var answered = Object.keys(q.answers).length;
+  var pct = q.total ? Math.round((answered / q.total) * 100) : 0;
+  var dots = q.questions.map(function (item, index) {
+    var ans = q.answers[item.id];
+    var cls = index === q.index ? 'is-current' : (ans ? (ans.correct ? 'is-answered' : 'is-wrong') : '');
+    return '<span class="qdot ' + cls + '"></span>';
+  }).join('');
+
+  return '<div class="quiz-shell">' +
+    '<header class="quiz-topbar">' +
+      '<button class="quiz-brand" type="button" data-action="quiz-exit" aria-label="Keluar dari latihan">' +
+        logoMarkHTML() + '<span class="brand-name">DIXIGRAM</span>' +
+      '</button>' +
+      '<div class="quiz-topbar-center">' +
+        '<span class="quiz-timer">' + icon('clock') + ' <span id="quiz-timer">' + formatDuration(Math.floor((Date.now() - q.startedAt) / 1000)) + '</span></span>' +
+        '<span class="chip chip--sm">' + answered + '/' + q.total + '</span>' +
+      '</div>' +
+      '<button class="btn btn-ghost btn-sm" data-action="quiz-exit">' + icon('x') + ' Keluar</button>' +
+    '</header>' +
+    '<div class="quiz-progress-wrap">' +
+      '<div class="quiz-progress-head"><span>Progress latihan</span><span><b>' + answered + '</b> / ' + q.total + ' soal</span></div>' +
+      '<div class="quiz-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><span style="width:' + pct + '%"></span></div>' +
+    '</div>' +
+    '<div class="quiz-stage">' + renderQuizCard(question, feedback) + '<div class="quiz-dots" aria-hidden="true">' + dots + '</div></div>' +
+  '</div>';
+}
+
+function renderQuizCard(question, feedback) {
+  var q = DIXI_STATE.quiz;
+  var isMcq = question.type === 'mcq';
+  var selected = q.selected;
+  var value = q.input || '';
+  var typeLabel = isMcq ? 'Pilihan ganda' : 'Isian singkat';
+
+  var body = '';
+  if (isMcq) {
+    body = '<div class="option-list" role="group" aria-label="Pilihan jawaban">' +
+      question.options.map(function (opt, index) {
+        var clases = 'option';
+        if (feedback) {
+          if (opt.text === feedback.correctAnswer) clases += ' is-correct';
+          else if (opt.id === feedback.given && !feedback.correct) clases += ' is-wrong';
+          else clases += ' is-dim';
+          if (opt.id === feedback.given && feedback.correct) clases += ' is-correct';
+        } else if (selected === opt.id) {
+          clases += ' is-selected';
+        }
+        return '<button type="button" class="' + clases + '" data-action="quiz-option" data-option="' + opt.id + '" ' + (feedback ? 'disabled' : '') + ' aria-pressed="' + (selected === opt.id) + '">' +
+          '<span class="option-letter">' + optionLetter(index) + '</span>' +
+          '<span class="option-text">' + esc(opt.text) + '</span>' +
+          (feedback ? '' : '<span class="option-key">' + (index + 1) + '</span>') +
+        '</button>';
+      }).join('') +
+    '</div>';
+  } else {
+    body = '<div class="quiz-input-wrap"><input id="quiz-input" class="quiz-input" type="text" aria-label="Jawabanmu" autocomplete="off" autocapitalize="none" spellcheck="false" ' +
+      'placeholder="' + esc(question.placeholder || 'Tulis jawabanmu…') + '" value="' + esc(value) + '" ' + (feedback ? 'disabled' : '') + '></div>';
+  }
+
+  var feedbackHtml = '';
+  if (feedback) {
+    feedbackHtml = '<div class="feedback ' + (feedback.correct ? 'feedback--correct' : 'feedback--wrong') + '" role="status">' +
+      '<div class="feedback-head"><span class="feedback-icon">' + icon(feedback.correct ? 'circle-check' : 'circle-x') + '</span>' +
+        '<div><div class="feedback-title">' + (feedback.correct ? 'Tepat sekali' : 'Belum tepat') + '</div>' +
+          '<div class="feedback-answer">' + (feedback.correct ? 'Jawabanmu benar.' : 'Jawaban benar: <b>' + esc(feedback.correctAnswer) + '</b>') + '</div>' +
+        '</div></div>' +
+      (feedback.explanation ? '<div class="feedback-explanation">' + esc(feedback.explanation) + '</div>' : '') +
+    '</div>';
+  }
+
+  var isLast = q.index >= q.total - 1;
+  var actions = feedback
+    ? '<div class="quiz-actions"><button class="btn btn-primary" data-action="quiz-next">' + (isLast ? 'Lihat hasil' : 'Lanjut') + ' ' + icon('arrow-right') + '</button>' +
+        '<span class="quiz-shortcut">Tekan <kbd>Enter</kbd></span></div>'
+    : '<div class="quiz-actions"><button class="btn btn-primary" data-action="quiz-check">Periksa jawaban ' + icon('check') + '</button>' +
+        '<span class="quiz-shortcut">' + (isMcq ? 'Pilih dengan <kbd>1</kbd>–<kbd>4</kbd> · ' : '') + 'Tekan <kbd>Enter</kbd></span></div>';
+
+  return '<div class="quiz-card track-' + q.track + '" aria-live="polite">' +
+    '<div class="quiz-meta"><span class="quiz-type">' + icon(isMcq ? 'list' : 'pen-line') + ' ' + typeLabel + '</span>' +
+      '<span class="quiz-qnum">SOAL ' + (q.index + 1) + ' / ' + q.total + '</span></div>' +
+    '<h1 class="question-text">' + esc(question.prompt) + '</h1>' +
+    (question.context ? '<div class="question-context">' + esc(question.context) + '</div>' : '') +
+    body + feedbackHtml + actions +
+  '</div>';
+}
+
+/* =========================================================================
+   ACTIONS
+   ========================================================================= */
+
+function handleQuizAction(action, el, event) {
+  if (action === 'quiz-option') {
+    selectQuizOption(el.getAttribute('data-option'));
+    return true;
+  }
+  if (action === 'quiz-check') {
+    submitCurrentAnswer();
+    return true;
+  }
+  if (action === 'quiz-next') {
+    nextQuizQuestion();
+    return true;
+  }
+  if (action === 'quiz-exit') {
+    requestQuizExit();
+    return true;
+  }
+  if (action === 'quiz-retry') {
+    retryQuiz();
+    return true;
+  }
+  if (action === 'quiz-next-module') {
+    goToNextModule(el);
+    return true;
+  }
+  if (action === 'quiz-go-dashboard') {
+    leaveQuizAndNavigate('#/dashboard');
+    return true;
+  }
+  if (action === 'quiz-back-lesson') {
+    leaveQuizToLesson();
+    return true;
+  }
+  return false;
+}
+
+function optionLetter(index) {
+  return String.fromCharCode(65 + index);
+}
+
+function selectQuizOption(optionId) {
+  var q = DIXI_STATE.quiz;
+  if (!q || q.answers[q.questions[q.index].id]) return;
+  q.selected = optionId;
+  document.querySelectorAll('.option').forEach(function (opt) {
+    var active = opt.getAttribute('data-option') === optionId;
+    opt.classList.toggle('is-selected', active);
+    opt.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function submitCurrentAnswer() {
+  var q = DIXI_STATE.quiz;
+  if (!q || q.submitting || q.finishing) return;
+  var question = q.questions[q.index];
+  if (q.answers[question.id]) return;
+
+  var answer = question.type === 'mcq' ? q.selected : String(q.input || '').trim();
+  if (!answer) {
+    toast('Pilih jawaban dulu', question.type === 'mcq' ? 'Klik salah satu opsi, lalu periksa.' : 'Tulis jawabanmu dulu, ya.', 'warning', 3000);
+    return;
+  }
+
+  q.submitting = true;
+  var button = document.querySelector('[data-action="quiz-check"]');
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner"></span> Memeriksa…';
+  }
+
+  apiCall('apiSubmitAnswer', DIXI_STATE.token, q.attemptId, question.id, answer)
+    .then(function (feedback) {
+      q.answers[question.id] = feedback;
+      q.submitting = false;
+      renderQuizRoute();
+      var card = document.querySelector('.quiz-card');
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    })
+    .catch(function (err) {
+      q.submitting = false;
+      toast('Jawaban belum terkirim', err.message || 'Coba lagi.', 'error');
+      renderQuizRoute();
+    });
+}
+
+function nextQuizQuestion() {
+  var q = DIXI_STATE.quiz;
+  if (!q) return;
+  var current = q.questions[q.index];
+  if (!q.answers[current.id]) return;
+
+  if (q.index >= q.total - 1) {
+    finishQuiz();
+    return;
+  }
+  q.index += 1;
+  q.selected = null;
+  q.input = '';
+  renderQuizRoute();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function finishQuiz() {
+  var q = DIXI_STATE.quiz;
+  if (!q || q.finishing) return;
+  q.finishing = true;
+  renderQuizRoute();
+
+  apiCall('apiFinishQuiz', DIXI_STATE.token, q.attemptId)
+    .then(function (payload) {
+      var newAchievements = applyQuizCompletion(payload);
+      q.results = {
+        payload: payload,
+        newAchievements: newAchievements,
+        questions: q.questions,
+        answers: q.answers,
+        module: q.module,
+        startedAt: q.startedAt
+      };
+      q.finishing = false;
+      q.loading = false;
+      stopQuizTimer();
+      renderQuizRoute();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (payload.result.score >= 80 || payload.result.perfect) {
+        setTimeout(function () { launchConfetti({ count: payload.result.perfect ? 130 : 90 }); }, 250);
+      }
+      if (newAchievements.length) {
+        setTimeout(function () {
+          toast('Pencapaian baru', newAchievements.map(function (a) { return a.title; }).join(', '), 'success', 6500);
+        }, 700);
+      }
+    })
+    .catch(function (err) {
+      q.finishing = false;
+      if (err.code === 'ATTEMPT_EXPIRED' || err.code === 'QUIZ_FINISHED' || err.code === 'FORBIDDEN') {
+        q.error = err.message || 'Sesi latihan tidak bisa diselesaikan.';
+        q.code = err.code;
+        renderQuizRoute();
+        if (!isGuest()) refreshBoot(true).catch(function () {});
+        return;
+      }
+      toast('Hasil belum tersimpan', err.message || 'Coba lagi sebentar lagi.', 'error');
+      renderQuizRoute();
+    });
+}
+
+function requestQuizExit() {
+  var q = DIXI_STATE.quiz;
+  if (!q) {
+    leaveQuizAndNavigate('#/dashboard');
+    return;
+  }
+  if (q.results || q.error || q.loading) {
+    if (q.error) leaveQuizAndNavigate('#/dashboard');
+    else leaveQuizToLesson();
+    return;
+  }
+
+  confirmDialog({
+    title: 'Keluar dari latihan?',
+    message: 'Jawaban yang sudah dikirim tetap dinilai, tetapi latihan ini belum selesai. ' +
+      (isLimited() ? 'Kuota latihan hari ini tetap terpakai.' : 'Progress belum akan diperbarui sampai latihan selesai.'),
+    confirmLabel: 'Keluar',
+    danger: true,
+    icon: 'x',
+    onConfirm: function () { leaveQuizToLesson(); }
+  });
+}
+
+function leaveQuizToLesson() {
+  var q = DIXI_STATE.quiz;
+  var track = q && q.track;
+  var moduleId = q && q.moduleId;
+  stopQuizTimer();
+  DIXI_STATE.quiz = null;
+  DIXI_STATE.pendingQuiz = null;
+  if (track && moduleId) navigateTo('#/lesson/' + track + '/' + moduleId);
+  else navigateTo('#/dashboard');
+}
+
+function leaveQuizAndNavigate(path) {
+  stopQuizTimer();
+  DIXI_STATE.quiz = null;
+  DIXI_STATE.pendingQuiz = null;
+  navigateTo(path);
+}
+
+function retryQuiz() {
+  var q = DIXI_STATE.quiz;
+  if (!q) return;
+  beginQuiz(q.track, q.moduleId);
+}
+
+function goToNextModule(el) {
+  var track = el.getAttribute('data-track');
+  var moduleId = el.getAttribute('data-module');
+  var locked = el.getAttribute('data-locked') === '1';
+  var title = el.getAttribute('data-title') || '';
+  if (locked) {
+    openUpsell('locked', title);
+    return;
+  }
+  stopQuizTimer();
+  DIXI_STATE.quiz = null;
+  DIXI_STATE.pendingQuiz = null;
+  if (track && moduleId) navigateTo('#/lesson/' + track + '/' + moduleId);
+  else navigateTo('#/dashboard');
+}
+
+function handleQuizKeydown(event) {
+  var q = DIXI_STATE.quiz;
+  if (!q || q.loading || q.error || q.results || q.finishing) return;
+  var key = event.key;
+  var current = q.questions[q.index];
+  var feedback = q.answers[current.id];
+  var tag = (event.target && event.target.tagName || '').toLowerCase();
+
+  if (key === 'Enter') {
+    event.preventDefault();
+    if (feedback) nextQuizQuestion();
+    else submitCurrentAnswer();
+    return;
+  }
+
+  if (feedback) return;
+  if (tag === 'input' || tag === 'textarea') return;
+
+  if (/^[1-4]$/.test(key) && current.type === 'mcq') {
+    var index = Number(key) - 1;
+    if (current.options[index]) {
+      event.preventDefault();
+      selectQuizOption(current.options[index].id);
+    }
+  }
+}
+
+function focusQuizInput() {
+  setTimeout(function () {
+    var input = document.getElementById('quiz-input');
+    if (input && !input.disabled) {
+      try { input.focus({ preventScroll: true }); } catch (err) { input.focus(); }
+    }
+  }, 60);
+}
+
+/* =========================================================================
+   RESULT
+   ========================================================================= */
+
+function renderQuizResult() {
+  var bundle = DIXI_STATE.quiz.results;
+  var payload = bundle.payload;
+  var r = payload.result;
+  var q = DIXI_STATE.quiz;
+  var score = Number(r.score) || 0;
+  var grade = score >= 90 ? { label: 'Luar biasa', cls: 'great' }
+    : score >= 75 ? { label: 'Bagus', cls: 'good' }
+    : score >= 60 ? { label: 'Teruskan', cls: 'ok' }
+    : { label: 'Coba lagi', cls: 'low' };
+  var circumference = 2 * Math.PI * 74;
+  var offset = circumference * (1 - score / 100);
+  var next = nextModuleFor(r.track, r.moduleId);
+  var newAch = bundle.newAchievements || [];
+
+  var review = bundle.questions.map(function (question) {
+    var a = bundle.answers[question.id] || {};
+    var givenText = a.given || '—';
+    if (question.type === 'mcq' && a.given) {
+      var match = question.options.filter(function (opt) { return opt.id === a.given; })[0];
+      if (match) givenText = match.text;
+    }
+    return '<div class="review-item ' + (a.correct ? 'review-item--ok' : 'review-item--bad') + '">' +
+      icon(a.correct ? 'circle-check' : 'circle-x') +
+      '<div><div class="review-q">' + esc(question.prompt) + '</div>' +
+        '<div class="review-a">Jawabanmu: <b>' + esc(givenText) + '</b>' +
+        (a.correct ? '' : ' · Jawaban benar: <b>' + esc(a.correctAnswer) + '</b>') +
+        '</div></div>' +
+    '</div>';
+  }).join('');
+
+  var badges = '';
+  if (r.perfect) badges += '<span class="chip chip--success">' + icon('sparkles') + ' Perfect score</span>';
+  if (r.isNewBest && !r.perfect) badges += '<span class="chip chip--success">' + icon('trending-up') + ' Best baru: ' + r.bestScore + '%</span>';
+  var repeatPct = Math.round((Number(getConfig().xp && getConfig().xp.repeatMultiplier) || 0.3) * 100);
+  if (r.repeat) badges += '<span class="chip">' + icon('rotate') + ' Latihan ulang · XP ' + repeatPct + '%</span>';
+  if (r.passed) badges += '<span class="chip chip--brand">' + icon('check') + ' Modul tuntas</span>';
+  if (newAch.length) {
+    newAch.forEach(function (a) {
+      badges += '<span class="chip chip--warm">' + icon(a.icon) + ' ' + esc(a.title) + '</span>';
+    });
+  }
+
+  var quota = guestQuota();
+  var canRetry = !isLimited() || (quota && quota.remaining > 0);
+  var actions = canRetry
+    ? '<button class="btn btn-primary" data-action="quiz-retry">' + icon('rotate') + ' Ulangi latihan</button>'
+    : (isPending()
+      ? '<button class="btn btn-primary" data-action="check-status">' + icon('rotate') + ' Cek status validasi</button>'
+      : '<button class="btn btn-primary" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Daftar untuk lanjut</button>');
+  if (next) {
+    actions += '<button class="btn btn-ghost" data-action="quiz-next-module" data-track="' + next.track + '" data-module="' + next.id + '" data-locked="' + (next.locked ? '1' : '0') + '" data-title="' + esc(next.title) + '">' +
+      icon(next.locked ? 'lock' : 'arrow-right') + ' ' + (next.locked ? 'Modul berikutnya' : 'Lanjut: ' + esc(next.title)) + '</button>';
+  }
+  actions += '<button class="btn btn-ghost" data-action="quiz-go-dashboard">' + icon('dashboard') + ' Dashboard</button>';
+
+  var guestUpsell = r.isGuest
+    ? '<div class="result-upsell">' + icon('sparkles') +
+        '<div><strong>Simpan progress ini?</strong><span>XP tamu hanya tersimpan di perangkat. Buat akun gratis agar progress, streak, dan lencana permanen.</span></div>' +
+        '<button class="btn btn-lime btn-sm" data-action="open-auth" data-mode="register">Daftar gratis</button>' +
+      '</div>'
+    : '';
+
+  return '<div class="result-shell">' +
+    '<div class="result-hero">' +
+      '<div class="result-kicker">' + esc(r.moduleTitle) + ' · selesai</div>' +
+      '<h1>' + (r.perfect ? 'Sempurna.' : r.passed ? 'Misi selesai.' : 'Hampir sampai.') + '</h1>' +
+      '<p class="result-sub">' + (r.perfect
+        ? 'Semua jawaban tepat. Level berikutnya menunggu.'
+        : r.passed
+          ? 'Kamu melewati ambang kelulusan. Pertahankan ritmenya.'
+          : 'Belum apa-apa — ulangi materi sebentar, lalu coba lagi.') + '</p>' +
+      '<div class="result-score-wrap">' +
+        '<div class="result-ring" role="img" aria-label="Skor ' + score + ' dari 100">' +
+          '<svg viewBox="0 0 160 160" aria-hidden="true">' +
+            '<circle class="ring-track" cx="80" cy="80" r="74"></circle>' +
+            '<circle class="ring-fill" cx="80" cy="80" r="74" style="stroke-dasharray:' + circumference.toFixed(2) + ';stroke-dashoffset:' + circumference.toFixed(2) + '" data-result-offset="' + offset.toFixed(2) + '"></circle>' +
+          '</svg>' +
+          '<div class="result-ring-content"><div class="result-score" data-count-to="' + score + '">0<span>%</span></div>' +
+            '<div class="result-score-label">Skor</div></div>' +
+        '</div>' +
+        '<div class="result-stats">' +
+          '<div class="result-stat"><span>Benar</span><strong>' + r.correct + ' / ' + r.total + '</strong></div>' +
+          '<div class="result-stat"><span>XP didapat</span><strong class="lime" data-count-to="' + (r.xpEarned || 0) + '">0</strong></div>' +
+          '<div class="result-stat"><span>Akurasi</span><strong data-count-to="' + score + '">0<span>%</span></strong></div>' +
+          '<div class="result-stat"><span>Durasi</span><strong>' + formatDuration(r.durationSec || Math.floor((Date.now() - bundle.startedAt) / 1000)) + '</strong></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="result-badges"><span class="grade-pill grade-pill--' + grade.cls + '">' + icon('star') + ' ' + grade.label + '</span>' + badges + '</div>' +
+      '<div class="result-actions">' + actions + '</div>' +
+      '<div class="result-note">' + (r.isGuest
+        ? 'Mode tamu · progress ini tersimpan lokal di browser.'
+        : 'Progress tersimpan di akunmu · ' + (r.repeat ? 'XP latihan ulang dibatasi ' + repeatPct + '%.' : 'XP penuh untuk modul ini hari ini.') +
+          (isPending() ? ' Tampil di peringkat setelah akun divalidasi.' : '')) + '</div>' +
+      guestUpsell +
+    '</div>' +
+
+    '<div class="review-panel">' +
+      '<div class="review-head"><h2>Review jawaban</h2><span>' + r.correct + ' benar · ' + (r.total - r.correct) + ' perlu diulang</span></div>' +
+      '<div class="review-list">' + review + '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function renderQuizError(message) {
+  var err = message || (DIXI_STATE.quiz && DIXI_STATE.quiz.error) || 'Latihan tidak bisa dimuat.';
+  var code = DIXI_STATE.quiz && DIXI_STATE.quiz.code;
+  var guest = isGuest();
+  return '<div class="error-page" style="margin:4vh auto 0;">' +
+    '<div class="error-icon">' + icon(code === 'PENDING_APPROVAL' ? 'clock' : (code === 'GUEST_LIMIT' || code === 'LOCKED' ? 'lock' : 'info')) + '</div>' +
+    '<h1>' + (code === 'GUEST_LIMIT' ? (isPending() ? 'Kuota harian habis' : 'Kuota tamu habis')
+      : code === 'LOCKED' ? 'Khusus member'
+      : code === 'PENDING_APPROVAL' ? 'Menunggu validasi admin'
+      : code === 'QUIZ_FINISHED' ? 'Latihan sudah tersimpan'
+      : 'Latihan belum siap') + '</h1>' +
+    '<p>' + esc(err) + '</p>' +
+    '<div class="hero-actions" style="justify-content:center;">' +
+      (guest && (code === 'GUEST_LIMIT' || code === 'LOCKED')
+        ? '<button class="btn btn-primary" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Daftar gratis</button>'
+        : '') +
+      (isPending() && (code === 'GUEST_LIMIT' || code === 'PENDING_APPROVAL')
+        ? '<button class="btn btn-primary" data-action="check-status">' + icon('rotate') + ' Cek status</button>'
+        : '') +
+      '<button class="btn btn-ghost" data-action="quiz-back-lesson">' + icon('arrow-left') + ' Kembali ke materi</button>' +
+      '<button class="btn btn-ghost" data-action="quiz-go-dashboard">Dashboard</button>' +
+    '</div>' +
+  '</div>';
+}
+
+function nextModuleFor(track, moduleId) {
+  var list = (getCatalog()[track] || []).slice().sort(function (a, b) { return a.order - b.order; });
+  var index = -1;
+  for (var i = 0; i < list.length; i++) if (list[i].id === moduleId) index = i;
+  if (index >= 0 && list[index + 1]) return moduleView(list[index + 1]);
+  return null;
+}
+
+function initResultAnimations() {
+  // Mode ringan (v1.2): angka & cincin skor langsung tampil tanpa animasi hitung.
+  var reduce = true;
+  var ring = document.querySelector('.result-ring .ring-fill');
+  if (ring) {
+    var target = ring.getAttribute('data-result-offset');
+    if (reduce) {
+      ring.style.strokeDashoffset = target;
+    } else {
+      requestAnimationFrame(function () {
+        setTimeout(function () { ring.style.strokeDashoffset = target; }, 80);
+      });
+    }
+  }
+
+  document.querySelectorAll('[data-count-to]').forEach(function (el) {
+    var target = Number(el.getAttribute('data-count-to')) || 0;
+    if (reduce) {
+      el.innerHTML = formatNumber(target) + (el.querySelector('span') ? '<span>%</span>' : '');
+      return;
+    }
+    var suffix = el.querySelector('span') ? '<span>%</span>' : '';
+    var start = null;
+    function step(ts) {
+      if (!start) start = ts;
+      var p = Math.min(1, (ts - start) / 900);
+      var eased = 1 - Math.pow(1 - p, 3);
+      el.innerHTML = formatNumber(Math.round(target * eased)) + suffix;
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  });
+}
+
+/* =========================================================================
+   TIMER
+   ========================================================================= */
+
+function startQuizTimer() {
+  stopQuizTimer();
+  updateQuizTimer();
+  DIXI_QUIZ_TIMER = setInterval(updateQuizTimer, 1000);
+}
+
+function stopQuizTimer() {
+  if (DIXI_QUIZ_TIMER) {
+    clearInterval(DIXI_QUIZ_TIMER);
+    DIXI_QUIZ_TIMER = null;
+  }
+}
+
+function updateQuizTimer() {
+  var el = document.getElementById('quiz-timer');
+  if (!el || !DIXI_STATE.quiz || !DIXI_STATE.quiz.startedAt) return;
+  el.textContent = formatDuration(Math.floor((Date.now() - DIXI_STATE.quiz.startedAt) / 1000));
+}
+
+/* =========================================================================
+   QUIZ INPUT LISTENER
+   ========================================================================= */
+
+document.addEventListener('input', function (event) {
+  if (event.target && event.target.id === 'quiz-input' && DIXI_STATE.quiz) {
+    DIXI_STATE.quiz.input = event.target.value;
+  }
+});
+</script>

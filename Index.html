@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="dark" data-text="md">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="DIXIGRAM — game belajar grammar dan vocabulary dengan materi, latihan, XP, level, streak, dan progress.">
+  <meta name="theme-color" content="#080b14">
+  <meta name="application-name" content="DIXIGRAM">
+  <meta name="color-scheme" content="dark light">
+  <title>DIXIGRAM — Grammar &amp; Vocabulary Game</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('dixigram:theme');
+        var theme = saved === 'light' || saved === 'dark'
+          ? saved
+          : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', theme);
+        var size = localStorage.getItem('dixigram:text-size');
+        document.documentElement.setAttribute('data-text', size === 'lg' || size === 'xl' ? size : 'md');
+      } catch (err) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        document.documentElement.setAttribute('data-text', 'md');
+      }
+    })();
+  </script>
+  <style><?!= include('Styles'); ?></style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Lewati ke konten utama</a>
+  <?!= include('Icons'); ?>
+
+  <div id="app" class="app-root" aria-live="polite">
+    <div class="boot-screen">
+      <div class="boot-logo" aria-hidden="true">
+        <span class="brand-mark brand-mark--xl"><svg class="logo-svg" viewBox="0 0 1080 1080"><use href="#dx-logo"></use></svg></span>
+      </div>
+      <div class="boot-name">DIXIGRAM</div>
+      <div class="boot-bar" aria-hidden="true"><span></span></div>
+      <p class="boot-text">Menyiapkan petualangan…</p>
+    </div>
+  </div>
+
+  <div id="modal-root" class="modal-root" aria-live="polite"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="false"></div>
+  <canvas id="confetti" class="confetti-canvas" aria-hidden="true"></canvas>
+
+  <noscript>
+    <div class="noscript-card">DIXIGRAM membutuhkan JavaScript. Aktifkan JavaScript di browser, lalu muat ulang halaman.</div>
+  </noscript>
+
+  <?!= include('App'); ?>
+  <?!= include('Views'); ?>
+  <?!= include('QuizUI'); ?>
+  <?!= include('AdminUI'); ?>
+</body>
+</html>

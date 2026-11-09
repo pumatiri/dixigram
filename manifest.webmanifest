@@ -1,0 +1,15 @@
+{
+  "name": "DIXIGRAM — Grammar & Vocabulary Game",
+  "short_name": "DIXIGRAM",
+  "description": "Game belajar grammar & vocabulary bahasa Inggris, 24 modul level A1–B2.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f2ec",
+  "theme_color": "#003CB4",
+  "lang": "id",
+  "icons": [
+    { "src": "assets/logo-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "assets/logo-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

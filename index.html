@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>DIXIGRAM — Grammar &amp; Vocabulary Game</title>
+  <meta name="description" content="DIXIGRAM — game belajar grammar dan vocabulary bahasa Inggris: 24 modul level A1–B2, latihan, XP, streak, dan papan peringkat.">
+  <meta name="theme-color" content="#003CB4">
+  <meta name="color-scheme" content="light dark">
+
+  <!-- Ikon & aplikasi (bisa "Tambahkan ke Layar Utama" di ponsel) -->
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="DIXIGRAM">
+
+  <!-- Pratinjau saat tautan dibagikan -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="DIXIGRAM — Grammar & Vocabulary Game">
+  <meta property="og:description" content="24 modul grammar & vocabulary level A1–B2 dengan latihan, XP, streak, dan peringkat.">
+  <meta property="og:image" content="assets/og-image.png">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <style>
+    :root { --brand: #003CB4; --bg: #f4f2ec; --text: #0b1a3a; --muted: #5b6785; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #080b14; --text: #eef2ff; --muted: #9aa5c4; } }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    #app-frame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+    #splash { position: fixed; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 14px; padding: 24px; text-align: center; background: var(--bg); transition: opacity .2s; }
+    #splash.is-hidden { opacity: 0; pointer-events: none; }
+    .logo { width: 76px; height: 76px; padding: 13px; border-radius: 22px; background: #fff;
+      box-shadow: 0 10px 30px rgba(0, 32, 96, .2); }
+    .logo img { width: 100%; height: 100%; display: block; }
+    .name { font-size: 22px; font-weight: 800; letter-spacing: .22em; padding-left: .22em; }
+    .bar { width: 170px; height: 4px; border-radius: 99px; background: rgba(127, 127, 127, .2); overflow: hidden; }
+    .bar span { display: block; width: 40%; height: 100%; border-radius: inherit; background: var(--brand);
+      animation: load 1.3s ease-in-out infinite; }
+    @keyframes load { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+    .hint { font-size: 14px; color: var(--muted); max-width: 340px; line-height: 1.55; min-height: 22px; }
+    .open-direct { display: none; margin-top: 4px; padding: 11px 18px; border-radius: 99px; background: var(--brand);
+      color: #fff; font-weight: 700; text-decoration: none; font-size: 15px; }
+    .open-direct.is-visible { display: inline-block; }
+    @media (prefers-reduced-motion: reduce) { .bar span { animation: none; width: 100%; } }
+  </style>
+</head>
+<body>
+  <div id="splash" role="status" aria-live="polite">
+    <div class="logo"><img src="assets/logo.svg" alt=""></div>
+    <div class="name">DIXIGRAM</div>
+    <div class="bar" aria-hidden="true"><span></span></div>
+    <p class="hint" id="hint">Menyiapkan petualangan…</p>
+    <a class="open-direct" id="open-direct" target="_top" rel="noopener">Buka langsung di Google Apps Script</a>
+  </div>
+
+  <iframe id="app-frame" title="DIXIGRAM"
+    allow="fullscreen; clipboard-write; autoplay"
+    allowfullscreen
+    referrerpolicy="strict-origin-when-cross-origin"></iframe>
+
+  <noscript>
+    <p style="padding:24px;text-align:center">DIXIGRAM membutuhkan JavaScript.
+      <a href="https://script.google.com/macros/s/AKfycbziyKkuiVjUwUN0dMuUeSbLMtxTsNA4YyiCgajUzBe3WIyQjehz7l3_Ha9wRehdalkjAg/exec">Buka aplikasi</a></p>
+  </noscript>
+
+  <script>
+    // URL Web App Apps Script. Ganti bila deployment berubah.
+    var APP_URL = 'https://script.google.com/macros/s/AKfycbziyKkuiVjUwUN0dMuUeSbLMtxTsNA4YyiCgajUzBe3WIyQjehz7l3_Ha9wRehdalkjAg/exec';
+
+    (function () {
+      var frame = document.getElementById('app-frame');
+      var splash = document.getElementById('splash');
+      var hint = document.getElementById('hint');
+      var direct = document.getElementById('open-direct');
+      direct.href = APP_URL;
+
+      var done = false;
+      frame.addEventListener('load', function () {
+        done = true;
+        splash.classList.add('is-hidden');
+        setTimeout(function () { splash.style.display = 'none'; }, 250);
+      });
+      frame.src = APP_URL;
+
+      // Bila server Google lambat (cold start) atau browser memblokir iframe pihak ketiga.
+      setTimeout(function () { if (!done) hint.textContent = 'Server sedang dibangunkan, sebentar lagi…'; }, 6000);
+      setTimeout(function () {
+        if (done) return;
+        hint.textContent = 'Belum terbuka juga? Browser mungkin memblokir aplikasi di dalam halaman ini.';
+        direct.classList.add('is-visible');
+      }, 18000);
+    })();
+  </script>
+</body>
+</html>
