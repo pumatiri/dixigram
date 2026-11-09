@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080">
+  <title>DIXIGRAM</title>
+  <mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="1080" height="1080">
+    <rect width="1080" height="1080" fill="#fff"/>
+    <circle cx="540" cy="540" r="432" fill="#000"/>
+    <circle cx="540" cy="540" r="216" fill="#fff"/>
+    <polygon points="540,538 878,200 977,318 755,540 540,540" fill="#fff"/>
+    <rect x="616" y="540" width="470" height="108" fill="#000"/>
+  </mask>
+  <path d="M0 0H540A540 540 0 0 1 540 1080H0Z" fill="#003CB4" mask="url(#m)"/>
+</svg>
