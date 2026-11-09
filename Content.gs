@@ -66,9 +66,9 @@ var DIXI_CONTENT = (function () {
           title: 'Rumus inti',
           icon: 'braces',
           formula: [
-            { label: 'Kalimat positif', value: 'S + V1 (+s/es untuk he/she/it)' },
-            { label: 'Kalimat negatif', value: 'S + do/does + not + V1' },
-            { label: 'Pertanyaan', value: 'Do/Does + S + V1?' }
+            { label: 'Kalimat positif', value: 'S + V-base (+s/es untuk he/she/it)' },
+            { label: 'Kalimat negatif', value: 'S + do/does + not + V-base' },
+            { label: 'Pertanyaan', value: 'Do/Does + S + V-base?' }
           ],
           table: {
             headers: ['Subjek', 'Contoh'],
@@ -216,9 +216,9 @@ var DIXI_CONTENT = (function () {
           title: 'Rumus inti',
           icon: 'braces',
           formula: [
-            { label: 'Positif', value: 'S + V2 (kata kerja bentuk kedua)' },
-            { label: 'Negatif', value: 'S + did not (didn’t) + V1' },
-            { label: 'Pertanyaan', value: 'Did + S + V1?' },
+            { label: 'Positif', value: 'S + V-past (kata kerja bentuk kedua)' },
+            { label: 'Negatif', value: 'S + did not (didn’t) + V-base' },
+            { label: 'Pertanyaan', value: 'Did + S + V-base?' },
             { label: 'Dengan be', value: 'S + was/were (+ not)' }
           ],
           table: {
@@ -226,8 +226,8 @@ var DIXI_CONTENT = (function () {
             rows: [
               ['I / He / She / It', 'was', 'was tired'],
               ['You / We / They', 'were', 'were tired'],
-              ['Semua subjek', 'didn’t + V1', 'didn’t go'],
-              ['Semua subjek', 'Did + S + V1?', 'Did you go?']
+              ['Semua subjek', 'didn’t + V-base', 'didn’t go'],
+              ['Semua subjek', 'Did + S + V-base?', 'Did you go?']
             ]
           }
         },
@@ -305,7 +305,7 @@ var DIXI_CONTENT = (function () {
           prompt: '___ you finish your homework last night?',
           options: ['Did', 'Do', 'Were', 'Have'],
           answer: 'a',
-          explanation: 'Pertanyaan Past Simple memakai Did + subjek + V1: “Did you finish…?”'
+          explanation: 'Pertanyaan Past Simple memakai Did + subjek + V-base: “Did you finish…?”'
         },
         {
           id: 'past-6',
@@ -493,7 +493,7 @@ var DIXI_CONTENT = (function () {
       accent: 'violet',
       description: 'Hubungkan masa lalu dengan saat ini memakai have/has + past participle.',
       objectives: [
-        'Membentuk kalimat dengan have/has + V3',
+        'Membentuk kalimat dengan have/has + V-past participle',
         'Membedakan Present Perfect dan Past Simple',
         'Memakai for, since, ever, never, already, dan yet'
       ],
@@ -515,9 +515,9 @@ var DIXI_CONTENT = (function () {
           title: 'Rumus inti',
           icon: 'braces',
           formula: [
-            { label: 'Positif', value: 'S + have/has + V3' },
-            { label: 'Negatif', value: 'S + have/has + not + V3' },
-            { label: 'Pertanyaan', value: 'Have/Has + S + V3?' }
+            { label: 'Positif', value: 'S + have/has + V-past participle' },
+            { label: 'Negatif', value: 'S + have/has + not + V-past participle' },
+            { label: 'Pertanyaan', value: 'Have/Has + S + V-past participle?' }
           ],
           table: {
             headers: ['Subjek', 'Contoh'],
@@ -576,7 +576,7 @@ var DIXI_CONTENT = (function () {
           prompt: 'She ___ lived here since 2019.',
           options: ['has', 'have', 'is', 'did'],
           answer: 'a',
-          explanation: 'She adalah orang ketiga tunggal, jadi memakai has + lived (V3).'
+          explanation: 'She adalah orang ketiga tunggal, jadi memakai has + lived (V-past participle).'
         },
         {
           id: 'pp-3',
@@ -622,7 +622,7 @@ var DIXI_CONTENT = (function () {
           id: 'pp-8',
           type: 'type',
           prompt: 'They have ___ (finish) the project.',
-          placeholder: 'Tulis bentuk V3',
+          placeholder: 'Tulis bentuk V-past participle',
           answers: ['finished'],
           explanation: 'Present Perfect memakai past participle. Finish → finished.'
         }
@@ -669,9 +669,9 @@ var DIXI_CONTENT = (function () {
           title: 'Rumus',
           icon: 'braces',
           formula: [
-            { label: 'Semua modal', value: 'S + modal + V1 (tanpa to, kecuali ought to)' },
-            { label: 'Negatif', value: 'S + modal + not + V1' },
-            { label: 'Pertanyaan', value: 'Modal + S + V1?' }
+            { label: 'Semua modal', value: 'S + modal + V-base (tanpa to, kecuali ought to)' },
+            { label: 'Negatif', value: 'S + modal + not + V-base' },
+            { label: 'Pertanyaan', value: 'Modal + S + V-base?' }
           ],
           examples: [
             { en: 'You should take a break.', id: 'Kamu sebaiknya istirahat.' },
@@ -788,8 +788,8 @@ var DIXI_CONTENT = (function () {
             headers: ['Tipe', 'If-clause', 'Main clause', 'Makna'],
             rows: [
               ['Zero', 'if + present', 'present', 'fakta umum'],
-              ['First', 'if + present', 'will + V1', 'kemungkinan nyata di masa depan'],
-              ['Second', 'if + past', 'would + V1', 'situasi imajiner saat ini']
+              ['First', 'if + present', 'will + V-base', 'kemungkinan nyata di masa depan'],
+              ['Second', 'if + past', 'would + V-base', 'situasi imajiner saat ini']
             ]
           }
         },
@@ -812,7 +812,7 @@ var DIXI_CONTENT = (function () {
           ],
           examples: [
             { en: 'I won’t go unless you come with me.', id: 'Saya tidak akan pergi kecuali kamu ikut.' },
-            { en: 'If you don’t hurry, you will be late.', id: 'Benar: if + present, will + V1.' },
+            { en: 'If you don’t hurry, you will be late.', id: 'Benar: if + present, will + V-base.' },
             { en: 'If you will hurry, you will be late.', id: 'Salah: will tidak dipakai di if-clause.' }
           ]
         }
@@ -824,7 +824,7 @@ var DIXI_CONTENT = (function () {
           prompt: 'If it rains tomorrow, we ___ at home.',
           options: ['stay', 'will stay', 'stayed', 'would stay'],
           answer: 'b',
-          explanation: 'First conditional: if + present, will + V1. Jadi: will stay.'
+          explanation: 'First conditional: if + present, will + V-base. Jadi: will stay.'
         },
         {
           id: 'cond-2',
@@ -848,7 +848,7 @@ var DIXI_CONTENT = (function () {
           prompt: 'If she ___ harder, she would pass.',
           options: ['studies', 'studied', 'will study', 'study'],
           answer: 'b',
-          explanation: 'Second conditional: if + past simple, would + V1. Jadi: studied.'
+          explanation: 'Second conditional: if + past simple, would + V-base. Jadi: studied.'
         },
         {
           id: 'cond-5',
@@ -864,7 +864,7 @@ var DIXI_CONTENT = (function () {
           prompt: 'If they left earlier, they ___ the train.',
           options: ['catch', 'will catch', 'would catch', 'caught'],
           answer: 'c',
-          explanation: 'Second conditional: if + past, would + V1. Jadi: would catch.'
+          explanation: 'Second conditional: if + past, would + V-base. Jadi: would catch.'
         },
         {
           id: 'cond-7',
@@ -872,7 +872,7 @@ var DIXI_CONTENT = (function () {
           prompt: 'If you don’t hurry, you ___ late.',
           options: ['are', 'will be', 'would be', 'were'],
           answer: 'b',
-          explanation: 'First conditional: if + present, will + V1. Jadi: will be.'
+          explanation: 'First conditional: if + present, will + V-base. Jadi: will be.'
         },
         {
           id: 'cond-8',
