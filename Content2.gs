@@ -208,9 +208,9 @@ var DIXI_CONTENT_EXTRA = [
         title: 'Will',
         icon: 'zap',
         formula: [
-          { label: 'Kalimat positif', value: 'S + will + V1' },
-          { label: 'Kalimat negatif', value: 'S + will not (won’t) + V1' },
-          { label: 'Pertanyaan', value: 'Will + S + V1?' }
+          { label: 'Kalimat positif', value: 'S + will + V-base' },
+          { label: 'Kalimat negatif', value: 'S + will not (won’t) + V-base' },
+          { label: 'Pertanyaan', value: 'Will + S + V-base?' }
         ],
         bullets: [
           'Keputusan spontan: “I’m thirsty. I’ll get some water.”',
@@ -223,9 +223,9 @@ var DIXI_CONTENT_EXTRA = [
         title: 'Be going to',
         icon: 'calendar',
         formula: [
-          { label: 'Kalimat positif', value: 'S + am/is/are + going to + V1' },
-          { label: 'Kalimat negatif', value: 'S + am/is/are + not + going to + V1' },
-          { label: 'Pertanyaan', value: 'Am/Is/Are + S + going to + V1?' }
+          { label: 'Kalimat positif', value: 'S + am/is/are + going to + V-base' },
+          { label: 'Kalimat negatif', value: 'S + am/is/are + not + going to + V-base' },
+          { label: 'Pertanyaan', value: 'Am/Is/Are + S + going to + V-base?' }
         ],
         bullets: [
           'Rencana yang sudah diputuskan sebelumnya: “We’re going to visit Bali next month.”',
@@ -249,7 +249,7 @@ var DIXI_CONTENT_EXTRA = [
       { id: 'ff-2', type: 'mcq', prompt: 'We bought the tickets last week. We ___ fly to Medan on Friday.', options: ['will', 'are going to', 'go to', 'will going to'], answer: 'b', explanation: 'Rencana yang sudah diputuskan sebelumnya memakai be going to.' },
       { id: 'ff-3', type: 'mcq', prompt: 'Look at those dark clouds! It ___ rain.', options: ['will', 'is going to', 'is go to', 'going'], answer: 'b', explanation: 'Ada bukti yang terlihat (awan gelap), jadi memakai is going to.' },
       { id: 'ff-4', type: 'type', prompt: 'I promise I ___ tell anyone your secret. (bentuk negatif will)', placeholder: 'Tulis bentuk negatif', answers: ['won\'t', 'will not'], explanation: 'Janji memakai will; negatifnya will not / won’t.' },
-      { id: 'ff-5', type: 'mcq', prompt: 'Pilih kalimat yang benar.', options: ['She will comes tomorrow.', 'She will come tomorrow.', 'She wills come tomorrow.', 'She will to come tomorrow.'], answer: 'b', explanation: 'Setelah will selalu V1 tanpa -s dan tanpa to.' },
+      { id: 'ff-5', type: 'mcq', prompt: 'Pilih kalimat yang benar.', options: ['She will comes tomorrow.', 'She will come tomorrow.', 'She wills come tomorrow.', 'She will to come tomorrow.'], answer: 'b', explanation: 'Setelah will selalu V-base tanpa -s dan tanpa to.' },
       { id: 'ff-6', type: 'type', prompt: '___ you going to study tonight?', placeholder: 'Tulis satu kata', answers: ['are'], explanation: 'Subjek you: “Are you going to study tonight?”' },
       { id: 'ff-7', type: 'mcq', prompt: 'I think the new phone ___ very expensive.', options: ['will be', 'is going be', 'will is', 'be'], answer: 'a', explanation: 'Prediksi berdasarkan pendapat (I think) memakai will be.' },
       { id: 'ff-8', type: 'mcq', prompt: 'Dina has already decided. She ___ learn Japanese next year.', options: ['will', 'is going to', 'going to', 'goes to'], answer: 'b', explanation: 'Keputusan yang sudah dibuat sebelumnya memakai is going to.' }
@@ -291,7 +291,7 @@ var DIXI_CONTENT_EXTRA = [
         title: 'Rumus di berbagai tense',
         icon: 'braces',
         formula: [
-          { label: 'Rumus dasar', value: 'Objek + be (sesuai tense) + V3' }
+          { label: 'Rumus dasar', value: 'Objek + be (sesuai tense) + V-past participle' }
         ],
         table: {
           headers: ['Tense', 'Aktif', 'Pasif'],
@@ -319,8 +319,8 @@ var DIXI_CONTENT_EXTRA = [
         title: 'Jebakan yang sering muncul',
         icon: 'shield',
         examples: [
-          { en: 'The letter was sent yesterday.', id: 'Benar: was + V3 (sent).' },
-          { en: 'The letter was send yesterday.', id: 'Salah: setelah be harus V3, bukan V1.' },
+          { en: 'The letter was sent yesterday.', id: 'Benar: was + V-past participle (sent).' },
+          { en: 'The letter was send yesterday.', id: 'Salah: setelah be harus V-past participle, bukan V-base.' },
           { en: 'The accident happened at night.', id: 'Benar: happen tidak punya bentuk pasif karena tidak memiliki objek.' }
         ],
         tip: 'Kata kerja tanpa objek (happen, arrive, die, sleep) tidak bisa dipasifkan.'
@@ -329,10 +329,10 @@ var DIXI_CONTENT_EXTRA = [
     quiz: [
       { id: 'pv-1', type: 'mcq', prompt: 'English ___ in many countries.', options: ['speaks', 'is spoken', 'is speaking', 'spoke'], answer: 'b', explanation: 'Bahasa “digunakan”, bukan “menggunakan”: is spoken.' },
       { id: 'pv-2', type: 'mcq', prompt: 'The windows ___ yesterday.', options: ['were cleaned', 'are cleaned', 'cleaned', 'were clean'], answer: 'a', explanation: 'Yesterday + subjek jamak + pasif: were cleaned.' },
-      { id: 'pv-3', type: 'type', prompt: 'The room is ___ (paint) right now, so please don’t go in.', placeholder: 'Tulis dua kata', answers: ['being painted'], explanation: 'Present continuous pasif: is being + V3 → is being painted.' },
-      { id: 'pv-4', type: 'mcq', prompt: 'The report has ___ to the manager.', options: ['been sent', 'sent', 'be sent', 'being sent'], answer: 'a', explanation: 'Present perfect pasif: has been + V3.' },
-      { id: 'pv-5', type: 'mcq', prompt: 'Ubah ke pasif: “They will announce the winner tomorrow.”', options: ['The winner will announce tomorrow.', 'The winner will be announced tomorrow.', 'The winner is announced tomorrow.', 'The winner will being announced tomorrow.'], answer: 'b', explanation: 'Future pasif: will be + V3.' },
-      { id: 'pv-6', type: 'type', prompt: 'All forms must ___ (sign) before Friday.', placeholder: 'Tulis dua kata', answers: ['be signed'], explanation: 'Modal pasif: must be + V3.' },
+      { id: 'pv-3', type: 'type', prompt: 'The room is ___ (paint) right now, so please don’t go in.', placeholder: 'Tulis dua kata', answers: ['being painted'], explanation: 'Present continuous pasif: is being + V-past participle → is being painted.' },
+      { id: 'pv-4', type: 'mcq', prompt: 'The report has ___ to the manager.', options: ['been sent', 'sent', 'be sent', 'being sent'], answer: 'a', explanation: 'Present perfect pasif: has been + V-past participle.' },
+      { id: 'pv-5', type: 'mcq', prompt: 'Ubah ke pasif: “They will announce the winner tomorrow.”', options: ['The winner will announce tomorrow.', 'The winner will be announced tomorrow.', 'The winner is announced tomorrow.', 'The winner will being announced tomorrow.'], answer: 'b', explanation: 'Future pasif: will be + V-past participle.' },
+      { id: 'pv-6', type: 'type', prompt: 'All forms must ___ (sign) before Friday.', placeholder: 'Tulis dua kata', answers: ['be signed'], explanation: 'Modal pasif: must be + V-past participle.' },
       { id: 'pv-7', type: 'mcq', prompt: 'Kalimat mana yang TIDAK bisa dibuat pasif?', options: ['Someone opened the door.', 'The accident happened last night.', 'They built the stadium in 2010.', 'People grow rice here.'], answer: 'b', explanation: 'Happen tidak memiliki objek, jadi tidak bisa dipasifkan.' },
       { id: 'pv-8', type: 'mcq', prompt: 'This novel ___ by a famous Indonesian author in 1980.', options: ['wrote', 'was written', 'has written', 'is writing'], answer: 'b', explanation: 'Novel ditulis (pasif) pada waktu lampau: was written.' }
     ]
@@ -406,8 +406,8 @@ var DIXI_CONTENT_EXTRA = [
         examples: [
           { en: '“Do you like coffee?” → She asked if I liked coffee.', id: 'Pertanyaan yes/no memakai if atau whether.' },
           { en: '“Where do you live?” → He asked where I lived.', id: 'Pertanyaan wh- memakai susunan kalimat biasa, tanpa do/does.' },
-          { en: '“Close the door.” → She told me to close the door.', id: 'Perintah: told + orang + to + V1.' },
-          { en: '“Don’t be late.” → He told us not to be late.', id: 'Larangan: told + orang + not to + V1.' }
+          { en: '“Close the door.” → She told me to close the door.', id: 'Perintah: told + orang + to + V-base.' },
+          { en: '“Don’t be late.” → He told us not to be late.', id: 'Larangan: told + orang + not to + V-base.' }
         ]
       }
     ],
@@ -418,7 +418,7 @@ var DIXI_CONTENT_EXTRA = [
       { id: 'rs-4', type: 'mcq', prompt: '“I have finished the report,” he said. → He said he ___ the report.', options: ['have finished', 'had finished', 'finishes', 'was finish'], answer: 'b', explanation: 'Present perfect mundur menjadi past perfect: had finished.' },
       { id: 'rs-5', type: 'mcq', prompt: '“Where do you live?” → She asked me where ___.', options: ['do I live', 'I lived', 'did I live', 'I do live'], answer: 'b', explanation: 'Pertanyaan tidak langsung memakai susunan kalimat biasa dan backshift: where I lived.' },
       { id: 'rs-6', type: 'mcq', prompt: '“Are you hungry?” → He asked ___ I was hungry.', options: ['that', 'if', 'what', 'to'], answer: 'b', explanation: 'Pertanyaan yes/no dilaporkan dengan if atau whether.' },
-      { id: 'rs-7', type: 'type', prompt: '“Close the window, please.” → She asked me ___ close the window.', placeholder: 'Tulis satu kata', answers: ['to'], explanation: 'Permintaan: asked + orang + to + V1.' },
+      { id: 'rs-7', type: 'type', prompt: '“Close the window, please.” → She asked me ___ close the window.', placeholder: 'Tulis satu kata', answers: ['to'], explanation: 'Permintaan: asked + orang + to + V-base.' },
       { id: 'rs-8', type: 'mcq', prompt: 'Minggu lalu Arif berkata, “I’m leaving tomorrow.” → Arif said he was leaving ___.', options: ['tomorrow', 'the next day', 'yesterday', 'the day before'], answer: 'b', explanation: 'Karena dilaporkan di waktu lain, tomorrow berubah menjadi the next day.' }
     ]
   },
@@ -687,7 +687,7 @@ var DIXI_CONTENT_EXTRA = [
       { id: 'hb-4', type: 'mcq', prompt: 'You need a ___ from the doctor to buy this medicine.', options: ['prescription', 'receipt', 'check-up', 'recipe'], answer: 'a', explanation: 'Prescription = resep dokter. Recipe adalah resep masakan.' },
       { id: 'hb-5', type: 'mcq', prompt: 'It took him two weeks to ___ from the flu.', options: ['recover', 'injure', 'prescribe', 'hurt'], answer: 'a', explanation: 'Recover from = pulih dari.' },
       { id: 'hb-6', type: 'mcq', prompt: 'I can’t talk much. I have a sore ___.', options: ['throat', 'head', 'stomach', 'tooth'], answer: 'a', explanation: 'Sore throat = sakit tenggorokan.' },
-      { id: 'hb-7', type: 'mcq', prompt: 'You look exhausted. You ___ get some rest.', options: ['should', 'shouldn’t', 'mustn’t', 'don’t'], answer: 'a', explanation: 'Saran memakai should + V1.' },
+      { id: 'hb-7', type: 'mcq', prompt: 'You look exhausted. You ___ get some rest.', options: ['should', 'shouldn’t', 'mustn’t', 'don’t'], answer: 'a', explanation: 'Saran memakai should + V-base.' },
       { id: 'hb-8', type: 'type', prompt: 'He fell during the match and got a knee ___.', placeholder: 'Tulis satu kata', answers: ['injury'], explanation: 'Cedera = injury.' }
     ]
   },
