@@ -1,19 +1,46 @@
-# DIXIGRAM v1.2 — Panduan Update
+# DIXIGRAM v1.3.0 — Panduan Update
 
-## Cara memasang (dari v1.1)
+Paket ini sudah mencakup semua revisi sebelumnya (v1.2 dan v1.2.1), jadi cukup pasang paket ini saja.
+
+## Cara memasang
 
 1. Buka proyek di editor Apps Script.
-2. **Tambah file baru:** `+` → Script, beri nama `Content2`, lalu tempel isi `Content2.gs` (berisi 12 modul baru).
-3. **Ganti isi** file berikut dengan versi baru:
-   `Code.gs`, `Auth.gs`, `Database.gs`, `Admin.gs`, `Content.gs`,
-   `Index.html`, `App.html`, `Views.html`, `QuizUI.html`, `AdminUI.html`, `Styles.html`, `Icons.html`.
-   File `Progress.gs`, `Quiz.gs`, dan `appsscript.json` tidak berubah.
-4. Salin lagi email admin Anda ke `ADMIN_EMAILS` di `Code.gs` (file baru masih berisi daftar kosong/contoh).
-5. Jalankan `setupDixigram` sekali dari editor. Kolom sesi baru (`SessionID`, `SessionDevice`, `SessionSeen`) ditambahkan otomatis ke sheet Users, dan data lama tetap aman.
+2. **Tambah file baru** (bila belum ada): `+` → Script, lalu tempel isinya.
+   - `Content2` ← isi `Content2.gs` (12 modul tambahan)
+   - `Donation` ← isi `Donation.gs` (data donasi dan gambar QRIS)
+3. **Ganti isi semua file lain** dengan versi di paket ini:
+   `Code.gs`, `Auth.gs`, `Database.gs`, `Admin.gs`, `Progress.gs`, `Quiz.gs`, `Content.gs`,
+   `Index.html`, `App.html`, `Views.html`, `QuizUI.html`, `AdminUI.html`, `Styles.html`, `Icons.html`, `appsscript.json`.
+4. Isi lagi email admin Anda di `ADMIN_EMAILS` (`Code.gs`), karena file baru berisi daftar contoh.
+5. Jalankan `setupDixigram` sekali dari editor. Kolom baru ditambahkan otomatis, dan data lama tetap aman.
 6. **Deploy → Kelola deployment → ✏️ → Versi: Versi baru → Deploy.** URL `/exec` tetap sama.
-7. (Opsional) Setelah situs GitHub Pages aktif, isi `PUBLIC_URL` di `Code.gs` dengan alamatnya (diakhiri `/`), lalu deploy versi baru lagi. Ini dipakai untuk favicon logo dan tautan di email notifikasi.
+7. Di repositori GitHub, unggah isi paket `DIXIGRAM-v1.3.0-github.zip`. Di dalamnya ada file baru `docs/assets/qris.png`.
 
-## Yang berubah
+## Baru di v1.3.0
+
+| No | Permintaan | Hasil |
+|---|---|---|
+| 1 | Istilah V1, V2, V3 | Diganti menjadi **V‑base**, **V‑past**, dan **V‑past participle** di semua materi, rumus, tabel, dan pembahasan soal. Modul Past Simple dan Present Perfect mendapat tips singkat yang menjelaskan ketiga istilah (go → went → gone). |
+| 2 | Tombol refresh manual | Ikon ⟳ di topbar, plus menu **Muat ulang data** di sidebar dan menu profil. Mengambil ulang data akun, progres, peringkat, status validasi, dan panel admin tanpa memuat ulang halaman. |
+| 3 | Donasi QRIS | Tombol **Donasi** (ikon hati) membuka jendela berisi kode QRIS **BeeCOMP Servis**, langkah membayar, tombol **Simpan gambar QRIS**, dan **Buka di tab baru**. |
+
+### Penyesuaian untuk donasi
+
+- **Tempat tombol:** halaman depan (navigasi, menu ponsel, bagian Akses, FAQ, footer), topbar (desktop), sidebar, menu profil, dan kartu kecil di dashboard. Tidak ada pop-up yang muncul sendiri.
+- **Akses tetap sama:** semua fitur sama bagi yang berdonasi maupun tidak, dan hal ini disebutkan di jendela donasi dan FAQ.
+- **Ringan:** gambar QRIS (±30 KB) baru diambil saat jendela donasi dibuka, jadi pemuatan awal tidak bertambah berat.
+- **Pengaturan admin:** **Admin → Pengaturan → Donasi** untuk menyalakan/mematikan tombol dan mengubah pesan. Admin tetap bisa melihat pratinjau walau tombol dimatikan.
+- **Pengecekan QRIS:** kodenya sudah dibaca ulang dan valid: QRIS statis atas nama BeeCOMP Servis, Kediri. Nominal diisi sendiri oleh donatur.
+- **Ganti QRIS:** ubah `IMAGE_BASE64` di `Donation.gs` dan `docs/assets/qris.png` di GitHub.
+
+## Riwayat v1.2.1 — tautan email ke GitHub
+
+- `PUBLIC_URL` di `Code.gs` berisi `https://pumatiri.github.io/dixigram/`, sehingga semua tautan di email notifikasi mengarah ke GitHub Pages.
+- Tautan `#/admin` di email benar-benar membuka panel admin.
+- **Admin → Pengaturan → Alamat aplikasi** menampilkan alamat yang dipakai.
+
+## Riwayat v1.2
+
 
 | No | Permintaan | Hasil |
 |---|---|---|

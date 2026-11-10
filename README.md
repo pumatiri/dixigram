@@ -12,7 +12,7 @@ Backend: Google Apps Script + Google Sheets · Frontend: HtmlService</p>
 src/                     Kode Apps Script (yang di-push ke script.google.com)
   appsscript.json
   Code.gs  Auth.gs  Database.gs  Admin.gs  Progress.gs  Quiz.gs
-  Content.gs  Content2.gs
+  Content.gs  Content2.gs  Donation.gs
   Index.html  App.html  Views.html  QuizUI.html  AdminUI.html  Styles.html  Icons.html
 docs/                    Situs GitHub Pages (pembungkus Web App + ikon)
   index.html  manifest.webmanifest  assets/
@@ -22,7 +22,7 @@ docs/                    Situs GitHub Pages (pembungkus Web App + ikon)
 ## 1. Publikasikan di GitHub Pages
 
 Halaman di `docs/` menampilkan Web App Apps Script secara penuh layar di alamat yang lebih rapi
-(mis. `https://namakamu.github.io/dixigram/`), lengkap dengan logo, favicon, dan pratinjau tautan.
+(`https://pumatiri.github.io/dixigram/`), lengkap dengan logo, favicon, dan pratinjau tautan.
 
 1. Buat repositori baru di GitHub, lalu unggah seluruh isi folder ini (atau `git push`).
 2. Buka **Settings → Pages**.
@@ -37,8 +37,10 @@ https://script.google.com/macros/s/AKfycbziyKkuiVjUwUN0dMuUeSbLMtxTsNA4YyiCgajUz
 
 Bila URL deployment berubah, ganti nilai `APP_URL` di `docs/index.html`.
 
-Setelah situs aktif, isi `PUBLIC_URL` di `src/Code.gs` dengan alamat GitHub Pages (diakhiri `/`).
-Nilai ini dipakai untuk favicon Web App dan tautan di email notifikasi.
+`PUBLIC_URL` di `src/Code.gs` sudah diisi `https://pumatiri.github.io/dixigram/`, jadi tautan di email
+notifikasi (pendaftar baru dan akun disetujui) mengarah ke GitHub Pages, bukan ke URL Apps Script.
+Tautan langsung seperti `https://pumatiri.github.io/dixigram/#/admin` diteruskan ke halaman yang sesuai.
+Bila nama repositori/akun berubah, ganti nilai itu (atau kosongkan dan isi lewat **Admin → Pengaturan → Alamat aplikasi**).
 
 > **Catatan:** Google selalu menampilkan banner kecil "This application was created by a Google Apps Script user"
 > di Web App akun Gmail biasa; ini tidak bisa dihilangkan. Bila suatu browser memblokir aplikasi di dalam iframe,
@@ -73,7 +75,7 @@ Persiapan sekali saja:
 > Jangan pernah meng-commit `.clasprc.json` atau `.clasp.json` (sudah ada di `.gitignore`).
 > Bila workflow gagal dengan pesan login/izin, ulangi `clasp login` dan perbarui secret `CLASPRC_JSON`.
 
-## Fitur utama (v1.2)
+## Fitur utama (v1.3)
 
 - 24 modul: 12 grammar + 12 vocabulary, 3 modul di setiap level A1, A2, B1, B2 · 192 soal · 96 kata
 - Mode kartu: kosakata (kata → arti) dan grammar (rumus, terjemahan, ubah kalimat)
@@ -81,4 +83,8 @@ Persiapan sekali saja:
 - **Single login**: akun non-admin hanya aktif di satu perangkat/browser; login kedua ditolak selama sesi lama aktif
   (aktif = ada aktivitas dalam 10 menit terakhir). Admin bisa mengeluarkan sesi yang "nyangkut".
 - Mode ringan: animasi dekoratif dan efek blur dimatikan agar cepat di ponsel
+- Istilah kata kerja: V‑base, V‑past, V‑past participle
+- Tombol muat ulang data (⟳) tanpa memuat ulang halaman
+- Gratis, dengan **donasi sukarela via QRIS** (bisa dimatikan di Admin → Pengaturan → Donasi).
+  Gambar QRIS ada di `src/Donation.gs` dan `docs/assets/qris.png`.
 - Ukuran teks Normal/Besar/Ekstra, tema terang/gelap

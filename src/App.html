@@ -1,0 +1,2671 @@
+<script>
+'use strict';
+
+/* =========================================================================
+   DIXIGRAM — App Core
+   File: App.html
+   ========================================================================= */
+
+var DIXI_TOKEN_KEY = 'dixigram:token';
+var DIXI_GUEST_KEY = 'dixigram:guest-progress:v1';
+var DIXI_THEME_KEY = 'dixigram:theme';
+var DIXI_TEXT_KEY = 'dixigram:text-size';
+var DIXI_ANNOUNCE_KEY = 'dixigram:announcement-dismissed';
+var DIXI_DEVICE_KEY = 'dixigram:device';
+var DIXI_HEARTBEAT = null;
+var DIXI_LAST_PING = 0;
+
+var DIXI_STATE = {
+  boot: null,
+  token: null,
+  session: null,
+  theme: 'dark',
+  route: { name: 'landing', params: {} },
+  booting: true,
+  bootError: '',
+  lesson: null,
+  lessonKey: '',
+  lessonRequestKey: '',
+  lessonError: '',
+  lessonErrorCode: '',
+  lessonLoading: false,
+  quiz: null,
+  pendingQuiz: null,
+  catalogFilter: { q: '', level: 'all' },
+  searchQuery: '',
+  modal: null,
+  userMenuOpen: false,
+  settingsGoal: 80,
+  lastBootHadToken: false,
+  textSize: 'md',
+  admin: null,
+  handlingExpiry: false
+};
+
+var DIXI_REVEAL_OBSERVER = null;
+var DIXI_DONATION = null;   // data jendela donasi (diambil sekali saat dibuka)
+var DIXI_REFRESHING = false;
+
+/* =========================================================================
+   API CLIENT
+   ========================================================================= */
+
+function apiCall(name) {
+  var args = Array.prototype.slice.call(arguments, 1);
+
+  if (window.DIXI_MOCK && typeof window.DIXI_MOCK.call === 'function') {
+    try {
+      return Promise.resolve(window.DIXI_MOCK.call(name, args));
+    } catch (err) {
+      return Promise.reject(err);
+    }
+  }
+
+  return new Promise(function (resolve, reject) {
+    if (!window.google || !google.script || !google.script.run) {
+      reject(new Error('Backend Apps Script tidak tersedia. Buka aplikasi melalui URL Web App yang sudah di-deploy.'));
+      return;
+    }
+
+    var runner = google.script.run
+      .withSuccessHandler(function (response) {
+        if (response && response.ok) {
+          resolve(response.data);
+          return;
+        }
+        var err = new Error((response && response.message) || 'Permintaan tidak bisa diproses.');
+        err.code = response && response.code;
+        if ((err.code === 'SESSION_EXPIRED' || err.code === 'SESSION_REPLACED') &&
+            ['apiLogin', 'apiRegister', 'apiBootstrap', 'apiLogout'].indexOf(name) === -1) {
+          var reason = err.code === 'SESSION_REPLACED' ? 'replaced' : 'expired';
+          setTimeout(function () { handleSessionExpired(reason); }, 0);
+        }
+        reject(err);
+      })
+      .withFailureHandler(function (error) {
+        reject(new Error((error && error.message) || 'Koneksi ke server gagal. Coba lagi.'));
+      });
+
+    try {
+      if (typeof runner[name] !== 'function') {
+        reject(new Error('Fungsi server tidak ditemukan: ' + name));
+        return;
+      }
+      runner[name].apply(runner, args);
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+/* =========================================================================
+   UTILITAS
+   ========================================================================= */
+
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+  });
+}
+
+function icon(name, cls) {
+  var safe = String(name || 'book-open').replace(/[^a-z0-9-]/g, '');
+  return '<svg class="icon ' + (cls || '') + '" aria-hidden="true" focusable="false"><use href="#i-' + safe + '"></use></svg>';
+}
+
+function initials(name) {
+  var parts = String(name || 'Explorer').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'D';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function avatarClass(name) {
+  var seed = 0;
+  var text = String(name || 'D');
+  for (var i = 0; i < text.length; i++) seed += text.charCodeAt(i) * (i + 1);
+  return seed % 3 === 0 ? 'avatar--lime' : (seed % 3 === 1 ? 'avatar--warm' : '');
+}
+
+function avatarHTML(name, extraClass) {
+  return '<span class="avatar ' + avatarClass(name) + ' ' + (extraClass || '') + '" aria-hidden="true">' +
+    esc(initials(name)) + '</span>';
+}
+
+/** Logo DIXIGRAM (simbol #dx-logo di Icons.html). */
+function logoMarkHTML(extraClass) {
+  return '<span class="brand-mark ' + (extraClass || '') + '" aria-hidden="true">' +
+    '<svg class="logo-svg" viewBox="0 0 1080 1080" focusable="false"><use href="#dx-logo"></use></svg></span>';
+}
+
+/** ID acak per browser, dipakai fitur single login untuk mengenali perangkat yang sama. */
+function deviceId() {
+  var id = '';
+  try { id = localStorage.getItem(DIXI_DEVICE_KEY) || ''; } catch (err) { id = ''; }
+  if (!/^[A-Za-z0-9_-]{16,64}$/.test(id)) {
+    var bytes = new Uint8Array(16);
+    try { window.crypto.getRandomValues(bytes); } catch (err) {
+      for (var i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    id = Array.prototype.map.call(bytes, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    try { localStorage.setItem(DIXI_DEVICE_KEY, id); } catch (err) { /* abaikan */ }
+    DIXI_STATE.deviceIdFallback = id;
+  }
+  return id || DIXI_STATE.deviceIdFallback || '';
+}
+
+function brandHTML(options) {
+  var opts = options || {};
+  var size = opts.size === 'sm' ? 'brand--sm' : '';
+  var tag = opts.link === false ? 'div' : 'a';
+  var linkAttrs = opts.link === false ? '' : ' href="#/dashboard" data-route="#/dashboard"';
+  return '<' + tag + ' class="brand ' + size + '"' + linkAttrs + '>' +
+    logoMarkHTML() +
+    '<span class="brand-copy"><span class="brand-name">DIXIGRAM</span>' +
+    (opts.hideTag ? '' : '<span class="brand-tag">Grammar · Vocabulary</span>') +
+    '</span></' + tag + '>';
+}
+
+function firstName(name) {
+  var parts = String(name || 'Explorer').trim().split(/\s+/);
+  return parts[0] || 'Explorer';
+}
+
+function greeting() {
+  var tz = getConfig().timezone || 'Asia/Jakarta';
+  var hour = 12;
+  try {
+    hour = Number(new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit', hour12: false, timeZone: tz
+    }).format(new Date()));
+  } catch (err) { hour = new Date().getHours(); }
+  if (hour < 11) return 'Selamat pagi';
+  if (hour < 15) return 'Selamat siang';
+  if (hour < 19) return 'Selamat sore';
+  return 'Selamat malam';
+}
+
+function dateKey(date) {
+  var d = date || new Date();
+  var tz = getConfig().timezone || 'Asia/Jakarta';
+  try {
+    var parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(d);
+    var map = {};
+    parts.forEach(function (p) { map[p.type] = p.value; });
+    return map.year + '-' + map.month + '-' + map.day;
+  } catch (err) {
+    return d.toISOString().slice(0, 10);
+  }
+}
+
+function yesterdayKey() {
+  return dateKey(new Date(Date.now() - 86400000));
+}
+
+function formatDateId(value, options) {
+  var d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('id-ID', Object.assign({
+      day: 'numeric', month: 'short', year: 'numeric', timeZone: getConfig().timezone || 'Asia/Jakarta'
+    }, options || {})).format(d);
+  } catch (err) { return d.toLocaleDateString(); }
+}
+
+function todayLabel() {
+  try {
+    return new Intl.DateTimeFormat('id-ID', {
+      weekday: 'long', day: 'numeric', month: 'long',
+      timeZone: getConfig().timezone || 'Asia/Jakarta'
+    }).format(new Date());
+  } catch (err) { return formatDateId(new Date()); }
+}
+
+function shortRelative(dateString) {
+  if (!dateString) return 'Baru saja';
+  var day = String(dateString).slice(0, 10);
+  var today = dateKey();
+  if (day === today) return 'Hari ini';
+  if (day === yesterdayKey()) return 'Kemarin';
+  return formatDateId(dateString, { day: 'numeric', month: 'short' });
+}
+
+function formatNumber(n) {
+  var value = Number(n) || 0;
+  try { return new Intl.NumberFormat('id-ID').format(value); }
+  catch (err) { return String(value); }
+}
+
+function formatDuration(seconds) {
+  var s = Math.max(0, Number(seconds) || 0);
+  var m = Math.floor(s / 60);
+  var rest = s % 60;
+  return m + 'm ' + (rest < 10 ? '0' : '') + rest + 's';
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function normalizeText(value) {
+  return String(value || '').toLowerCase().trim();
+}
+
+function getConfig() {
+  return (DIXI_STATE.boot && DIXI_STATE.boot.config) || {
+    appName: 'DIXIGRAM',
+    version: '1.0.0',
+    timezone: 'Asia/Jakarta',
+    quizSize: 6,
+    passScore: 60,
+    xp: { correct: 10, complete: 20, perfect: 30, repeatMultiplier: 0.3, levelXp: 200 },
+    defaultGoal: 80,
+    guest: { quizLimit: 2, freeModules: { grammar: [], vocabulary: [] } }
+  };
+}
+
+function levelInfo(xp) {
+  var amount = Math.max(0, Number(xp) || 0);
+  var per = Number(getConfig().xp && getConfig().xp.levelXp) || 200;
+  var level = Math.floor(amount / per) + 1;
+  var inLevel = amount % per;
+  return {
+    level: level,
+    xpInLevel: inLevel,
+    nextXp: level * per,
+    progress: Math.round((inLevel / per) * 100)
+  };
+}
+
+function isGuest() {
+  return !DIXI_STATE.session || DIXI_STATE.session.isGuest !== false;
+}
+
+/** 'guest' | 'pending' | 'full' */
+function sessionAccess() {
+  if (isGuest()) return 'guest';
+  return (DIXI_STATE.session && DIXI_STATE.session.access) || 'full';
+}
+
+function isPending() {
+  return sessionAccess() === 'pending';
+}
+
+/** Tamu atau akun yang belum divalidasi: akses & kuota terbatas. */
+function isLimited() {
+  return sessionAccess() !== 'full';
+}
+
+function isAdmin() {
+  return !isGuest() && !!(DIXI_STATE.session && DIXI_STATE.session.isAdmin);
+}
+
+function getSettingsPublic() {
+  return (DIXI_STATE.boot && DIXI_STATE.boot.settings) || {
+    requireApproval: true, registrationOpen: true, announcement: '', announcementTone: 'info', guestLimit: 2
+  };
+}
+
+function donationOn() {
+  return getSettingsPublic().donationEnabled !== false;
+}
+
+/* =========================================================================
+   DONASI (QRIS)
+   ========================================================================= */
+
+function openDonation() {
+  closeUserMenu();
+  openModal({
+    title: 'Dukung DIXIGRAM',
+    subtitle: 'Donasi sukarela via QRIS',
+    cardClass: 'modal-card--donate',
+    focus: false,
+    body: '<div id="donate-body">' + (DIXI_DONATION ? donationBodyHTML(DIXI_DONATION) : donationLoadingHTML()) + '</div>'
+  });
+  if (DIXI_DONATION) return;
+  apiCall('apiDonation', DIXI_STATE.token || null)
+    .then(function (data) {
+      DIXI_DONATION = data;
+      var box = document.getElementById('donate-body');
+      if (box) box.innerHTML = donationBodyHTML(data);
+    })
+    .catch(function (err) {
+      var box = document.getElementById('donate-body');
+      if (box) box.innerHTML = '<div class="donate-error">' + icon('wifi-off') + '<p>' + esc(err.message || 'Gagal memuat kode QRIS.') + '</p>' +
+        '<button class="btn btn-ghost btn-sm" data-action="donate-retry">' + icon('rotate') + ' Coba lagi</button></div>';
+    });
+}
+
+function donationLoadingHTML() {
+  return '<div class="donate-loading"><span class="spinner" aria-hidden="true"></span><span>Memuat kode QRIS…</span></div>';
+}
+
+function donationBodyHTML(d) {
+  return '<p class="donate-msg">' + esc(d.message) + '</p>' +
+    '<figure class="donate-qr">' +
+      '<img src="' + d.image + '" alt="Kode QRIS donasi atas nama ' + esc(d.merchant) + '" width="852" height="1083" decoding="async">' +
+    '</figure>' +
+    '<div class="donate-to">' + icon('shield') + '<span>Penerima: <strong>' + esc(d.merchant) + '</strong>' + (d.org ? ' · ' + esc(d.org) : '') + '</span></div>' +
+    '<ol class="donate-steps">' +
+      '<li>Buka aplikasi m-banking atau e-wallet yang mendukung QRIS (mis. GoPay, OVO, DANA, ShopeePay, LinkAja).</li>' +
+      '<li>Pindai kode di atas. Bila DIXIGRAM terbuka di HP yang sama, simpan gambarnya dulu lalu pilih dari galeri di menu scan.</li>' +
+      '<li>Isi nominal seikhlasnya, pastikan nama penerima <strong>' + esc(d.merchant) + '</strong>, lalu bayar.</li>' +
+    '</ol>' +
+    '<div class="donate-actions">' +
+      '<a class="btn btn-primary" href="' + d.image + '" download="QRIS-Donasi-DIXIGRAM.png">' + icon('download') + ' Simpan gambar QRIS</a>' +
+      (d.imageUrl ? '<a class="btn btn-ghost" href="' + esc(d.imageUrl) + '" target="_blank" rel="noopener">' + icon('link') + ' Buka di tab baru</a>' : '') +
+    '</div>' +
+    '<p class="donate-note">' + icon('heart') + '<span>Donasi tidak mengubah akses. Semua fitur tetap sama, dengan atau tanpa donasi. Terima kasih atas dukunganmu!</span></p>';
+}
+
+/* =========================================================================
+   MUAT ULANG MANUAL
+   ========================================================================= */
+
+/** Tombol refresh: ambil ulang data akun, progres, peringkat, dan panel admin. */
+function manualRefresh() {
+  if (DIXI_REFRESHING) return;
+  DIXI_REFRESHING = true;
+  closeUserMenu();
+  setRefreshButtons(true);
+  if (DIXI_STATE.admin) markAdminStale();
+  DIXI_DONATION = null;
+  refreshBoot(false)
+    .then(function () {
+      DIXI_LAST_PING = Date.now();
+      if (DIXI_STATE.route.name === 'admin' && typeof ensureAdminLoaded === 'function') ensureAdminLoaded(true);
+    })
+    .catch(function (err) {
+      toast('Gagal memuat ulang', (err && err.message) || 'Periksa koneksi internet, lalu coba lagi.', 'error');
+    })
+    .then(function () {
+      DIXI_REFRESHING = false;
+      setRefreshButtons(false);
+    });
+}
+
+function setRefreshButtons(busy) {
+  Array.prototype.forEach.call(document.querySelectorAll('[data-action="refresh-app"]'), function (btn) {
+    btn.classList.toggle('is-refreshing', busy);
+    btn.setAttribute('aria-busy', busy ? 'true' : 'false');
+  });
+}
+
+function refreshButtonHTML() {
+  return '<button class="icon-btn topbar-refresh' + (DIXI_REFRESHING ? ' is-refreshing' : '') + '" data-action="refresh-app" title="Muat ulang data" aria-label="Muat ulang data">' + icon('rotate') + '</button>';
+}
+
+function adminPendingCount() {
+  if (DIXI_STATE.boot && DIXI_STATE.boot.admin && typeof DIXI_STATE.boot.admin.pending === 'number') {
+    return DIXI_STATE.boot.admin.pending;
+  }
+  if (DIXI_STATE.admin && DIXI_STATE.admin.counts) return DIXI_STATE.admin.counts.pending || 0;
+  return 0;
+}
+
+function getCatalog() {
+  return (DIXI_STATE.boot && DIXI_STATE.boot.catalog) || { grammar: [], vocabulary: [] };
+}
+
+function getAllModules() {
+  var cat = getCatalog();
+  return (cat.grammar || []).concat(cat.vocabulary || []);
+}
+
+function findModule(track, id) {
+  var list = getCatalog()[track] || [];
+  for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+  return null;
+}
+
+/* =========================================================================
+   GUEST PROGRESS (LOCAL)
+   ========================================================================= */
+
+function guestDefault() {
+  return {
+    xp: 0,
+    quizzes: 0,
+    correct: 0,
+    total: 0,
+    streak: 0,
+    lastActive: '',
+    goal: Number(getConfig().defaultGoal) || 80,
+    modules: {},
+    activity: [],
+    createdAt: new Date().toISOString()
+  };
+}
+
+function readGuestProgress() {
+  var base = guestDefault();
+  try {
+    var raw = localStorage.getItem(DIXI_GUEST_KEY);
+    if (!raw) return base;
+    var parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return base;
+    base.xp = Number(parsed.xp) || 0;
+    base.quizzes = Number(parsed.quizzes) || 0;
+    base.correct = Number(parsed.correct) || 0;
+    base.total = Number(parsed.total) || 0;
+    base.streak = Number(parsed.streak) || 0;
+    base.lastActive = String(parsed.lastActive || '');
+    base.goal = Number(parsed.goal) || base.goal;
+    base.modules = parsed.modules && typeof parsed.modules === 'object' ? parsed.modules : {};
+    base.activity = Array.isArray(parsed.activity) ? parsed.activity.slice(0, 80) : [];
+    base.createdAt = parsed.createdAt || base.createdAt;
+    return base;
+  } catch (err) {
+    return base;
+  }
+}
+
+function saveGuestProgress(progress) {
+  try { localStorage.setItem(DIXI_GUEST_KEY, JSON.stringify(progress)); }
+  catch (err) { /* storage bisa penuh / diblokir */ }
+}
+
+function recordGuestResult(result) {
+  var g = readGuestProgress();
+  var today = dateKey();
+
+  if (g.lastActive !== today) {
+    g.streak = g.lastActive === yesterdayKey() ? (g.streak || 0) + 1 : 1;
+  }
+  g.lastActive = today;
+  g.xp += Number(result.xpEarned) || 0;
+  g.quizzes += 1;
+  g.correct += Number(result.correct) || 0;
+  g.total += Number(result.total) || 0;
+
+  var key = result.track + ':' + result.moduleId;
+  var mod = g.modules[key] || {
+    attempts: 0, correct: 0, total: 0, bestScore: 0,
+    completed: false, lastPlayed: ''
+  };
+  mod.attempts += 1;
+  mod.correct += Number(result.correct) || 0;
+  mod.total += Number(result.total) || 0;
+  mod.bestScore = Math.max(Number(mod.bestScore) || 0, Number(result.score) || 0);
+  mod.completed = !!mod.completed || Number(result.score) >= (getConfig().passScore || 60);
+  mod.lastPlayed = new Date().toISOString();
+  g.modules[key] = mod;
+
+  g.activity.unshift({
+    date: today,
+    track: result.track,
+    moduleId: result.moduleId,
+    correct: Number(result.correct) || 0,
+    total: Number(result.total) || 0,
+    score: Number(result.score) || 0,
+    xp: Number(result.xpEarned) || 0,
+    createdAt: new Date().toISOString()
+  });
+  g.activity = g.activity.slice(0, 80);
+  saveGuestProgress(g);
+  return g;
+}
+
+function guestWeek(activity) {
+  var xpByDate = {};
+  (activity || []).forEach(function (a) {
+    xpByDate[a.date] = (xpByDate[a.date] || 0) + (Number(a.xp) || 0);
+  });
+  var days = [];
+  for (var i = 6; i >= 0; i--) {
+    var d = new Date(Date.now() - i * 86400000);
+    var key = dateKey(d);
+    var label = '';
+    try {
+      label = new Intl.DateTimeFormat('id-ID', {
+        weekday: 'short', timeZone: getConfig().timezone || 'Asia/Jakarta'
+      }).format(d).replace('.', '');
+    } catch (err) { label = key.slice(8); }
+    days.push({ date: key, label: label, xp: xpByDate[key] || 0, isToday: i === 0 });
+  }
+  return days;
+}
+
+function countGuestGoalDays(activity, goal) {
+  var byDate = {};
+  (activity || []).forEach(function (a) {
+    byDate[a.date] = (byDate[a.date] || 0) + (Number(a.xp) || 0);
+  });
+  var count = 0;
+  Object.keys(byDate).forEach(function (key) {
+    if (byDate[key] >= goal) count++;
+  });
+  return count;
+}
+
+function bestStreakFromActivity(activity) {
+  var dates = [];
+  (activity || []).forEach(function (a) {
+    if (a.date && dates.indexOf(a.date) === -1) dates.push(a.date);
+  });
+  dates.sort();
+  if (!dates.length) return 0;
+  var best = 1;
+  var current = 1;
+  for (var i = 1; i < dates.length; i++) {
+    var prev = new Date(dates[i - 1] + 'T00:00:00Z').getTime();
+    var next = new Date(dates[i] + 'T00:00:00Z').getTime();
+    current = Math.round((next - prev) / 86400000) === 1 ? current + 1 : 1;
+    if (current > best) best = current;
+  }
+  return best;
+}
+
+function accuracyPeakFromActivity(activity) {
+  var chrono = (activity || []).slice().sort(function (a, b) {
+    return String(a.createdAt || a.date).localeCompare(String(b.createdAt || b.date));
+  });
+  var correct = 0;
+  var answers = 0;
+  var peak = 0;
+  chrono.forEach(function (a) {
+    correct += Number(a.correct) || 0;
+    answers += Number(a.total) || 0;
+    if (answers >= 30) peak = Math.max(peak, Math.round((correct / answers) * 100));
+  });
+  return peak;
+}
+
+function getViewProfile() {
+  if (!isGuest() && DIXI_STATE.boot && DIXI_STATE.boot.profile) {
+    return DIXI_STATE.boot.profile;
+  }
+  var g = readGuestProgress();
+  var lvl = levelInfo(g.xp);
+  return {
+    name: 'Explorer',
+    email: '',
+    isGuest: true,
+    xp: g.xp,
+    level: lvl.level,
+    levelProgress: lvl.progress,
+    nextLevelXp: lvl.nextXp,
+    xpInLevel: lvl.xpInLevel,
+    streak: g.streak,
+    dailyGoal: g.goal,
+    joinedAt: g.createdAt
+  };
+}
+
+function getViewProgress() {
+  if (!isGuest() && DIXI_STATE.boot && DIXI_STATE.boot.progress) {
+    return DIXI_STATE.boot.progress;
+  }
+
+  var g = readGuestProgress();
+  var pass = getConfig().passScore || 60;
+  var modules = getAllModules().map(function (m) {
+    var p = g.modules[m.track + ':' + m.id] || {};
+    return {
+      track: m.track,
+      moduleId: m.id,
+      title: m.title,
+      subtitle: m.subtitle,
+      level: m.level,
+      icon: m.icon,
+      order: m.order,
+      locked: m.locked,
+      bestScore: Number(p.bestScore) || 0,
+      attempts: Number(p.attempts) || 0,
+      correct: Number(p.correct) || 0,
+      total: Number(p.total) || 0,
+      completed: !!p.completed,
+      lastPlayed: p.lastPlayed || ''
+    };
+  });
+
+  function statsFor(track) {
+    var list = modules.filter(function (m) { return m.track === track; });
+    var done = list.filter(function (m) { return m.completed; });
+    var attempted = list.filter(function (m) { return m.attempts > 0; });
+    var correct = attempted.reduce(function (sum, m) { return sum + m.correct; }, 0);
+    var total = attempted.reduce(function (sum, m) { return sum + m.total; }, 0);
+    var avg = attempted.length ? Math.round(attempted.reduce(function (sum, m) { return sum + m.bestScore; }, 0) / attempted.length) : 0;
+    return {
+      total: list.length,
+      attempted: attempted.length,
+      completed: done.length,
+      accuracy: total ? Math.round((correct / total) * 100) : 0,
+      avgBest: avg,
+      xp: (g.activity || []).filter(function (a) { return a.track === track; }).reduce(function (sum, a) { return sum + (Number(a.xp) || 0); }, 0),
+      completionPct: Math.round((done.length / list.length) * 100)
+    };
+  }
+
+  var today = dateKey();
+  var todayStats = { xp: 0, answers: 0, correct: 0, quizzes: 0, bestScore: 0 };
+  (g.activity || []).forEach(function (a) {
+    if (a.date === today) {
+      todayStats.xp += Number(a.xp) || 0;
+      todayStats.answers += Number(a.total) || 0;
+      todayStats.correct += Number(a.correct) || 0;
+      todayStats.quizzes += 1;
+      todayStats.bestScore = Math.max(todayStats.bestScore, Number(a.score) || 0);
+    }
+  });
+
+  var completed = modules.filter(function (m) { return m.completed; }).length;
+  var accuracy = g.total ? Math.round((g.correct / g.total) * 100) : 0;
+  var lvl = levelInfo(g.xp);
+
+  return {
+    level: lvl,
+    xp: g.xp,
+    streak: g.streak,
+    bestStreak: bestStreakFromActivity(g.activity),
+    goal: g.goal,
+    today: todayStats,
+    goalPct: Math.min(100, Math.round((todayStats.xp / (g.goal || 1)) * 100)),
+    totalModules: modules.length,
+    completed: completed,
+    completionPct: modules.length ? Math.round((completed / modules.length) * 100) : 0,
+    quizzes: g.quizzes,
+    answers: g.total,
+    correct: g.correct,
+    accuracy: accuracy,
+    accuracyPeak: accuracyPeakFromActivity(g.activity),
+    perfect: modules.filter(function (m) { return m.bestScore >= 100; }).length,
+    goalDays: countGuestGoalDays(g.activity, g.goal),
+    trackStats: {
+      grammar: statsFor('grammar'),
+      vocabulary: statsFor('vocabulary')
+    },
+    modules: modules,
+    weekly: guestWeek(g.activity),
+    recent: (g.activity || []).slice(0, 5).map(function (a) {
+      var m = findModule(a.track, a.moduleId);
+      return {
+        id: a.createdAt,
+        date: a.date,
+        createdAt: a.createdAt,
+        track: a.track,
+        moduleId: a.moduleId,
+        title: m ? m.title : a.moduleId,
+        icon: m ? m.icon : 'book-open',
+        score: a.score,
+        correct: a.correct,
+        total: a.total,
+        xp: a.xp
+      };
+    }),
+    lastActive: g.activity.length ? g.activity[0].createdAt : '',
+    isLocal: true
+  };
+}
+
+function getViewAchievements() {
+  if (!isGuest() && DIXI_STATE.boot && DIXI_STATE.boot.achievements) {
+    return DIXI_STATE.boot.achievements;
+  }
+  var catalog = (DIXI_STATE.boot && DIXI_STATE.boot.achievementCatalog) || [];
+  if (!catalog.length) return [];
+  var progress = getViewProgress();
+  var profile = getViewProfile();
+  var grammarCompleted = progress.trackStats.grammar.completed;
+  var vocabCompleted = progress.trackStats.vocabulary.completed;
+  var metrics = {
+    quizzes: progress.quizzes,
+    perfect: progress.perfect,
+    streak: progress.bestStreak,
+    grammarCompleted: grammarCompleted,
+    vocabCompleted: vocabCompleted,
+    completed: progress.completed,
+    xp: profile.xp,
+    answers: progress.answers,
+    accuracy: progress.accuracyPeak,
+    goalDays: progress.goalDays,
+    balanced: Math.min(grammarCompleted, 2) + Math.min(vocabCompleted, 2)
+  };
+
+  return catalog.map(function (a) {
+    var value = Number(metrics[a.metric]) || 0;
+    var gateOk = !a.gate || (Number(metrics[a.gate.metric]) || 0) >= a.gate.target;
+    return Object.assign({}, a, {
+      unlocked: value >= a.target && gateOk,
+      progress: Math.min(value, a.target),
+      gateMet: gateOk,
+      gateProgress: a.gate ? Math.min(Number(metrics[a.gate.metric]) || 0, a.gate.target) : null
+    });
+  });
+}
+
+function moduleView(module) {
+  if (!module) return null;
+  if (!isGuest()) return module;
+  var g = readGuestProgress();
+  var p = g.modules[module.track + ':' + module.id] || {};
+  return Object.assign({}, module, {
+    bestScore: Number(p.bestScore) || 0,
+    attempts: Number(p.attempts) || 0,
+    completed: !!p.completed
+  });
+}
+
+function recommendedModule() {
+  var modules = getAllModules().map(moduleView).filter(function (m) { return m && !m.locked; });
+  if (!modules.length) return null;
+  var unfinished = modules.filter(function (m) { return !m.completed; });
+  if (unfinished.length) {
+    unfinished.sort(function (a, b) {
+      if (a.track !== b.track) return a.track === 'grammar' ? -1 : 1;
+      return a.order - b.order;
+    });
+    return unfinished[0];
+  }
+  return modules[0];
+}
+
+/** Kuota harian untuk tamu & akun pending (null bila full access). */
+function guestQuota() {
+  if (!isLimited()) return null;
+  var session = DIXI_STATE.boot && DIXI_STATE.boot.session;
+  if (session && (session.quota || session.guest)) return session.quota || session.guest;
+  var limit = Number(getConfig().guest.quizLimit);
+  if (!isFinite(limit)) limit = 2;
+  return { used: 0, limit: limit, remaining: limit };
+}
+
+function setQuota(quota) {
+  if (!quota || !DIXI_STATE.boot || !DIXI_STATE.boot.session) return;
+  DIXI_STATE.boot.session.quota = quota;
+  if (DIXI_STATE.boot.session.isGuest) DIXI_STATE.boot.session.guest = quota;
+}
+
+function syncCatalogFromProgress(progress) {
+  if (!DIXI_STATE.boot || !DIXI_STATE.boot.catalog || !progress) return;
+  var map = {};
+  (progress.modules || []).forEach(function (m) {
+    map[m.track + ':' + m.moduleId] = m;
+  });
+  ['grammar', 'vocabulary'].forEach(function (track) {
+    (DIXI_STATE.boot.catalog[track] || []).forEach(function (m) {
+      var p = map[m.track + ':' + m.id];
+      if (p) {
+        m.bestScore = p.bestScore;
+        m.attempts = p.attempts;
+        m.completed = p.completed;
+      }
+    });
+  });
+}
+
+function applyQuizCompletion(payload) {
+  var before = {};
+  getViewAchievements().forEach(function (a) { if (a.unlocked) before[a.id] = true; });
+
+  if (payload.quota) setQuota(payload.quota);
+  if (payload.isGuest) {
+    recordGuestResult(payload.result);
+  } else {
+    if (DIXI_STATE.boot) {
+      DIXI_STATE.boot.profile = payload.profile;
+      DIXI_STATE.boot.progress = payload.progress;
+      DIXI_STATE.boot.achievements = payload.achievements;
+      syncCatalogFromProgress(payload.progress);
+    }
+  }
+
+  return getViewAchievements().filter(function (a) {
+    return a.unlocked && !before[a.id];
+  });
+}
+
+/* =========================================================================
+   BOOT & ROUTING
+   ========================================================================= */
+
+function readToken() {
+  try { return localStorage.getItem(DIXI_TOKEN_KEY) || ''; }
+  catch (err) { return ''; }
+}
+
+function writeToken(token) {
+  try {
+    if (token) localStorage.setItem(DIXI_TOKEN_KEY, token);
+    else localStorage.removeItem(DIXI_TOKEN_KEY);
+  } catch (err) { /* abaikan */ }
+}
+
+function applyBoot(data) {
+  var prevEmail = DIXI_STATE.session && DIXI_STATE.session.user ? DIXI_STATE.session.user.email : '';
+  DIXI_STATE.boot = data;
+  DIXI_STATE.token = data.token || '';
+  DIXI_STATE.session = data.session || { isGuest: true };
+  var nextEmail = DIXI_STATE.session.user ? DIXI_STATE.session.user.email : '';
+  if (prevEmail !== nextEmail || !isAdmin()) DIXI_STATE.admin = null;
+  writeToken(data.token || '');
+}
+
+/** Dipanggil saat server menyatakan sesi login sudah tidak berlaku. */
+function handleSessionExpired(reason) {
+  if (DIXI_STATE.handlingExpiry) return;
+  DIXI_STATE.handlingExpiry = true;
+  stopHeartbeat();
+  if (typeof stopQuizTimer === 'function') stopQuizTimer();
+  writeToken('');
+  DIXI_STATE.token = '';
+  DIXI_STATE.quiz = null;
+  DIXI_STATE.pendingQuiz = null;
+  DIXI_STATE.lesson = null;
+  apiCall('apiBootstrap', null)
+    .then(function (data) {
+      applyBoot(data);
+      if (DIXI_STATE.modal) closeModal();
+      navigateTo('#/');
+      if (reason === 'replaced') {
+        toast('Sesi diakhiri', 'Akunmu sudah dipakai masuk di perangkat lain. Satu akun hanya bisa aktif di satu perangkat.', 'warning', 8000);
+      } else {
+        toast('Sesi berakhir', 'Silakan masuk lagi untuk melanjutkan progress-mu.', 'warning', 6200);
+      }
+    })
+    .catch(function () { /* biarkan pengguna memuat ulang */ })
+    .then(function () { DIXI_STATE.handlingExpiry = false; });
+}
+
+/* =========================================================================
+   DETAK SESI (single login, notifikasi admin, status validasi)
+   ========================================================================= */
+
+function heartbeatSeconds() {
+  var s = DIXI_STATE.session && Number(DIXI_STATE.session.heartbeat);
+  return s && s >= 30 ? s : 120;
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  if (isGuest()) return;
+  DIXI_LAST_PING = Date.now();
+  DIXI_HEARTBEAT = setInterval(function () { sendPing(false); }, heartbeatSeconds() * 1000);
+}
+
+function stopHeartbeat() {
+  if (DIXI_HEARTBEAT) clearInterval(DIXI_HEARTBEAT);
+  DIXI_HEARTBEAT = null;
+}
+
+function sendPing(force) {
+  if (isGuest() || !DIXI_STATE.token || DIXI_STATE.handlingExpiry) return;
+  if (!force && Date.now() - DIXI_LAST_PING < 25000) return;
+  DIXI_LAST_PING = Date.now();
+  apiCall('apiPing', DIXI_STATE.token)
+    .then(function (res) {
+      if (!res || res.role === 'guest') return;
+      if (res.token) {
+        DIXI_STATE.token = res.token;
+        writeToken(res.token);
+      }
+      if (res.access === 'full' && isPending()) {
+        refreshBoot(true).then(function () {
+          launchConfetti({ count: 50 });
+          toast('Akun sudah divalidasi', 'Full access aktif. Semua modul sekarang terbuka.', 'success', 6500);
+        }).catch(function () {});
+        return;
+      }
+      if (res.admin) applyAdminPulse(res.admin, true);
+    })
+    .catch(function () { /* jaringan putus: coba lagi di detak berikutnya */ });
+}
+
+/** Memperbarui lencana lonceng admin; beri toast bila ada pendaftar baru. */
+function applyAdminPulse(pulse, notify) {
+  if (!pulse || !DIXI_STATE.boot) return;
+  var before = DIXI_STATE.boot.admin || { pending: 0, latestPendingAt: '' };
+  DIXI_STATE.boot.admin = pulse;
+  var changed = pulse.pending !== before.pending || pulse.latestPendingAt !== before.latestPendingAt;
+  if (DIXI_STATE.admin) {
+    DIXI_STATE.admin.counts = Object.assign({}, DIXI_STATE.admin.counts || {}, { pending: pulse.pending });
+    if (changed) {
+      // Data panel admin sudah basi: muat ulang (langsung bila panel sedang dibuka).
+      DIXI_STATE.admin.overviewAt = 0;
+      DIXI_STATE.admin.usersAt = 0;
+      if (notify && DIXI_STATE.route.name === 'admin' && !DIXI_STATE.modal && typeof ensureAdminLoaded === 'function') ensureAdminLoaded();
+    }
+  }
+  updateAdminBadges();
+  var isNew = pulse.pending > 0 && pulse.latestPendingAt && pulse.latestPendingAt > String(before.latestPendingAt || '');
+  if (notify && isNew) {
+    toast(
+      'Pendaftar baru',
+      (pulse.latestPendingName || 'Seseorang') + ' menunggu validasi' + (pulse.pending > 1 ? ' (' + pulse.pending + ' total).' : '.'),
+      'info', 9000,
+      { label: 'Tinjau', action: 'admin-notif' }
+    );
+  }
+}
+
+/** Mengganti angka lencana admin tanpa merender ulang seluruh halaman. */
+function updateAdminBadges() {
+  var n = adminPendingCount();
+  document.querySelectorAll('[data-admin-badge]').forEach(function (el) {
+    el.textContent = n > 99 ? '99+' : String(n);
+    el.hidden = !n;
+  });
+  var bell = document.querySelector('.admin-bell');
+  if (bell) {
+    bell.classList.toggle('has-pending', n > 0);
+    bell.setAttribute('aria-label', n ? n + ' pendaftar menunggu validasi' : 'Notifikasi pendaftar');
+  }
+}
+
+function adminBellHTML() {
+  if (!isAdmin()) return '';
+  var n = adminPendingCount();
+  return '<button class="icon-btn admin-bell ' + (n ? 'has-pending' : '') + '" data-action="admin-notif" title="Pendaftar baru" aria-label="' +
+    (n ? n + ' pendaftar menunggu validasi' : 'Notifikasi pendaftar') + '">' + icon('bell') +
+    '<span class="admin-bell-badge" data-admin-badge' + (n ? '' : ' hidden') + '>' + (n > 99 ? '99+' : n) + '</span></button>';
+}
+
+/** Memuat ulang data akun dari server (mis. cek status validasi). */
+function refreshBoot(silent) {
+  return apiCall('apiBootstrap', DIXI_STATE.token || null).then(function (data) {
+    var wasPending = isPending();
+    applyBoot(data);
+    if (DIXI_STATE.route.name !== 'quiz') renderRoute();
+    if (!silent) {
+      if (wasPending && !isPending() && !isGuest()) {
+        launchConfetti({ count: 110 });
+        toast('Akun sudah divalidasi', 'Full access aktif. Semua modul sekarang terbuka.', 'success', 6500);
+      } else if (isPending()) {
+        toast('Masih menunggu validasi', 'Admin belum memvalidasi akunmu. Coba cek lagi nanti.', 'info');
+      } else {
+        toast('Data diperbarui', '', 'success', 2400);
+      }
+    }
+    return data;
+  });
+}
+
+/**
+ * Tautan seperti .../#/admin (dari email atau halaman GitHub) membawa hash di
+ * halaman luar Apps Script; bingkai aplikasi mulai tanpa hash. Salin ke dalam.
+ */
+function adoptOuterHash() {
+  try {
+    if (window.location.hash || !window.google || !google.script || !google.script.url) return;
+    google.script.url.getLocation(function (loc) {
+      var hash = String(loc && loc.hash || '').replace(/^#/, '');
+      if (!hash || hash.indexOf('/') !== 0 || window.location.hash) return;
+      try { history.replaceState(null, '', '#' + hash); } catch (err) { window.location.hash = hash; return; }
+      if (!DIXI_STATE.booting && DIXI_STATE.boot) handleRouteChange();
+    });
+  } catch (err) { /* abaikan */ }
+}
+
+function bootDixi() {
+  adoptOuterHash();
+  var hadToken = !!readToken();
+  DIXI_STATE.booting = true;
+  DIXI_STATE.bootError = '';
+  DIXI_STATE.lastBootHadToken = hadToken;
+  renderBootScreen();
+
+  apiCall('apiBootstrap', hadToken ? readToken() : null)
+    .then(function (data) {
+      applyBoot(data);
+      DIXI_STATE.booting = false;
+      var route = routeFromLocation();
+      DIXI_STATE.route = route;
+      renderRoute();
+      if (data.session && data.session.expired && hadToken) {
+        setTimeout(function () {
+          if (data.session.endReason === 'replaced') {
+            toast('Sesi diakhiri', 'Akunmu sudah dipakai masuk di perangkat lain. Masuk lagi di sini bila perlu.', 'warning', 7000);
+          } else {
+            toast('Sesi berakhir', 'Sesi login kamu sudah habis. Silakan masuk lagi untuk melanjutkan progress.', 'warning', 6200);
+          }
+        }, 300);
+      }
+      startHeartbeat();
+      if (route.name !== 'landing' && route.name !== 'quiz') {
+        window.scrollTo({ top: 0, behavior: 'auto' });
+      }
+    })
+    .catch(function (err) {
+      DIXI_STATE.booting = false;
+      DIXI_STATE.bootError = err && err.message ? err.message : 'Tidak bisa memuat DIXIGRAM.';
+      renderBootError(DIXI_STATE.bootError);
+    });
+}
+
+function renderBootScreen() {
+  var app = document.getElementById('app');
+  if (!app) return;
+  app.innerHTML =
+    '<div class="boot-screen">' +
+      '<div class="boot-logo" aria-hidden="true">' + logoMarkHTML('brand-mark--xl') + '</div>' +
+      '<div class="boot-name">DIXIGRAM</div>' +
+      '<div class="boot-bar" aria-hidden="true"><span></span></div>' +
+      '<p class="boot-text">Menyiapkan petualangan…</p>' +
+    '</div>';
+}
+
+function renderBootError(message) {
+  var app = document.getElementById('app');
+  if (!app) return;
+  app.innerHTML =
+    '<div class="error-page">' +
+      '<div class="error-icon">' + icon('info', 'icon-xl') + '</div>' +
+      '<h1>Belum bisa tersambung</h1>' +
+      '<p>' + esc(message) + '</p>' +
+      '<p class="muted" style="font-size:11px;margin-bottom:20px;">Pastikan Web App sudah di-deploy dengan akses <strong>Anyone</strong>, lalu muat ulang halaman ini.</p>' +
+      '<button class="btn btn-primary" data-action="retry-boot">' + icon('rotate') + ' Coba lagi</button>' +
+    '</div>';
+}
+
+function routeFromLocation() {
+  var raw = window.location.hash || '';
+  if (!raw || raw === '#' || raw === '#/' || raw.indexOf('#/') !== 0) {
+    return { name: isGuest() ? 'landing' : 'dashboard', params: {} };
+  }
+
+  var clean = raw.replace(/^#\/?/, '');
+  var parts = clean.split('/').filter(Boolean);
+  var name = parts[0] || 'landing';
+
+  if (name === 'lesson') {
+    return {
+      name: 'lesson',
+      params: {
+        track: decodeURIComponent(parts[1] || ''),
+        moduleId: decodeURIComponent(parts[2] || '')
+      }
+    };
+  }
+  if (name === 'quiz') {
+    if (!DIXI_STATE.quiz && !DIXI_STATE.pendingQuiz) {
+      try { window.history.replaceState(null, '', '#/dashboard'); } catch (err) { /* abaikan */ }
+      return { name: 'dashboard', params: {} };
+    }
+    return { name: 'quiz', params: {} };
+  }
+  if (name === 'admin') {
+    if (!isAdmin()) {
+      try { window.history.replaceState(null, '', '#/dashboard'); } catch (err) { /* abaikan */ }
+      return { name: 'dashboard', params: {} };
+    }
+    return { name: 'admin', params: { tab: decodeURIComponent(parts[1] || '') } };
+  }
+  if (['dashboard', 'grammar', 'vocabulary', 'progress', 'achievements', 'leaderboard', 'landing'].indexOf(name) !== -1) {
+    return { name: name, params: {} };
+  }
+  return { name: 'dashboard', params: {} };
+}
+
+function handleRouteChange() {
+  if (DIXI_STATE.booting || !DIXI_STATE.boot) return;
+  if (DIXI_STATE.modal) closeModal();
+  DIXI_STATE.userMenuOpen = false;
+  closeLandingMenu();
+  var route = routeFromLocation();
+  DIXI_STATE.route = route;
+
+  if (route.name !== 'quiz' && (DIXI_STATE.quiz || DIXI_STATE.pendingQuiz)) {
+    if (typeof stopQuizTimer === 'function') stopQuizTimer();
+    DIXI_STATE.quiz = null;
+    DIXI_STATE.pendingQuiz = null;
+  }
+  if (route.name !== 'lesson') {
+    DIXI_STATE.lesson = null;
+    DIXI_STATE.lessonKey = '';
+    DIXI_STATE.lessonRequestKey = '';
+  }
+  DIXI_STATE.lessonError = '';
+  DIXI_STATE.lessonErrorCode = '';
+  renderRoute();
+  window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+function navigateTo(path) {
+  var target = String(path || '#/');
+  if (target.charAt(0) !== '#') target = '#/' + target.replace(/^\/+/, '');
+  if (DIXI_STATE.modal) closeModal();
+  closeLandingMenu();
+  DIXI_STATE.userMenuOpen = false;
+  if (window.location.hash === target) {
+    handleRouteChange();
+  } else {
+    window.location.hash = target;
+  }
+}
+
+function renderRoute() {
+  if (!DIXI_STATE.boot) return;
+  var route = DIXI_STATE.route;
+
+  if (route.name === 'landing') {
+    document.title = 'DIXIGRAM — Grammar & Vocabulary Game';
+    document.getElementById('app').innerHTML = renderLandingPage();
+    initLanding();
+    initReveal();
+    updateThemeControls();
+    updateFullscreenControls();
+    return;
+  }
+
+  if (route.name === 'quiz') {
+    document.title = 'Latihan · DIXIGRAM';
+    renderQuizRoute();
+    initReveal();
+    updateThemeControls();
+    updateFullscreenControls();
+    return;
+  }
+
+  if (typeof stopQuizTimer === 'function') stopQuizTimer();
+
+  document.title = pageTitle(route.name) + ' · DIXIGRAM';
+  renderAppShell();
+  initReveal();
+  updateThemeControls();
+  updateFullscreenControls();
+
+  if (route.name === 'lesson') {
+    ensureLessonLoaded(route.params.track, route.params.moduleId);
+  }
+  if (route.name === 'admin' && typeof ensureAdminLoaded === 'function') {
+    ensureAdminLoaded();
+  }
+}
+
+function pageTitle(name) {
+  var titles = {
+    dashboard: 'Dashboard',
+    grammar: 'Grammar Quest',
+    vocabulary: 'Word Voyage',
+    progress: 'Progres',
+    achievements: 'Pencapaian',
+    leaderboard: 'Peringkat',
+    lesson: 'Materi',
+    admin: 'Panel Admin'
+  };
+  return titles[name] || 'DIXIGRAM';
+}
+
+function renderAppShell() {
+  var active = DIXI_STATE.route.name;
+  var guest = isGuest();
+  var page = renderCurrentPage();
+
+  document.getElementById('app').innerHTML =
+    '<div class="app-shell">' +
+      sidebarHTML(active) +
+      '<main class="main" id="main">' +
+        topbarHTML() +
+        '<div class="content">' +
+          announcementHTML() +
+          (guest ? guestBannerHTML() : (isPending() ? pendingBannerHTML() : '')) +
+          '<div class="view" data-page="' + esc(active) + '">' + page + '</div>' +
+        '</div>' +
+      '</main>' +
+    '</div>' +
+    bottomNavHTML(active) +
+    zenFabHTML();
+
+  DIXI_STATE.userMenuOpen = false;
+}
+
+function renderCurrentPage() {
+  var route = DIXI_STATE.route;
+  if (route.name === 'dashboard') return renderDashboard();
+  if (route.name === 'grammar') return renderCatalog('grammar');
+  if (route.name === 'vocabulary') return renderCatalog('vocabulary');
+  if (route.name === 'progress') return renderProgressPage();
+  if (route.name === 'achievements') return renderAchievementsPage();
+  if (route.name === 'leaderboard') return renderLeaderboardPage();
+  if (route.name === 'admin' && typeof renderAdminPage === 'function') return renderAdminPage();
+  if (route.name === 'lesson') {
+    var key = route.params.track + ':' + route.params.moduleId;
+    if (DIXI_STATE.lesson && DIXI_STATE.lessonKey === key) return renderLessonPage();
+    if (DIXI_STATE.lessonError) {
+      var code = DIXI_STATE.lessonErrorCode;
+      var pendingLock = code === 'PENDING_APPROVAL';
+      var locked = code === 'LOCKED' || code === 'AUTH_REQUIRED' || pendingLock;
+      return '<div class="error-page" style="margin-top:4vh;">' +
+        '<div class="error-icon">' + icon(pendingLock ? 'clock' : (locked ? 'lock' : 'info')) + '</div>' +
+        '<h1>' + (pendingLock ? 'Menunggu validasi admin' : (locked ? 'Materi ini khusus member' : 'Materi belum bisa dimuat')) + '</h1>' +
+        '<p>' + esc(DIXI_STATE.lessonError) + '</p>' +
+        '<div class="hero-actions" style="justify-content:center;">' +
+          (pendingLock
+            ? '<button class="btn btn-primary" data-action="check-status">' + icon('rotate') + ' Cek status</button>'
+            : locked
+              ? '<button class="btn btn-primary" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Daftar gratis</button>'
+              : '<button class="btn btn-primary" data-action="retry-lesson">' + icon('rotate') + ' Coba lagi</button>') +
+          '<button class="btn btn-ghost" data-route="#/' + esc(route.params.track || 'grammar') + '">Kembali ke katalog</button>' +
+        '</div>' +
+      '</div>';
+    }
+    return '<div class="loading-block"><span class="spinner"></span> Memuat materi…</div>';
+  }
+  return renderDashboard();
+}
+
+function ensureLessonLoaded(track, moduleId) {
+  var key = track + ':' + moduleId;
+  if (DIXI_STATE.lesson && DIXI_STATE.lessonKey === key) return;
+  if (DIXI_STATE.lessonRequestKey === key) return;
+
+  DIXI_STATE.lessonRequestKey = key;
+  DIXI_STATE.lessonError = '';
+  DIXI_STATE.lessonErrorCode = '';
+  DIXI_STATE.lessonLoading = true;
+
+  apiCall('apiGetLesson', DIXI_STATE.token, track, moduleId)
+    .then(function (data) {
+      if (DIXI_STATE.route.name !== 'lesson' ||
+          DIXI_STATE.route.params.track !== track ||
+          DIXI_STATE.route.params.moduleId !== moduleId) return;
+      DIXI_STATE.lesson = data;
+      DIXI_STATE.lessonKey = key;
+      DIXI_STATE.lessonLoading = false;
+      DIXI_STATE.lessonRequestKey = '';
+      DIXI_STATE.lessonErrorCode = '';
+      renderAppShell();
+      initReveal();
+      initLesson();
+      updateThemeControls();
+      updateFullscreenControls();
+    })
+    .catch(function (err) {
+      if (DIXI_STATE.route.name !== 'lesson') return;
+      DIXI_STATE.lessonLoading = false;
+      DIXI_STATE.lessonRequestKey = '';
+      DIXI_STATE.lessonError = err.message || 'Materi tidak bisa dimuat.';
+      DIXI_STATE.lessonErrorCode = err.code || '';
+      renderAppShell();
+      if (err.code === 'LOCKED' || err.code === 'AUTH_REQUIRED') openUpsell('locked');
+      if (err.code === 'PENDING_APPROVAL') openUpsell('pending');
+    });
+}
+
+/* =========================================================================
+   SHELL: SIDEBAR / TOPBAR / BOTTOM NAV
+   ========================================================================= */
+
+function sidebarHTML(active) {
+  var profile = getViewProfile();
+  var progress = getViewProgress();
+  var guest = isGuest();
+  var quota = guestQuota();
+  var week = progress.weekly || [];
+  var streakDays = week.map(function (d) { return '<i class="' + (d.xp > 0 ? 'on' : '') + '"></i>'; }).join('');
+
+  return '<aside class="sidebar" aria-label="Navigasi utama">' +
+    '<div class="sidebar-head">' + brandHTML() + '</div>' +
+    '<nav class="side-nav">' +
+      '<div class="nav-label">Belajar</div>' +
+      navItem('dashboard', 'dashboard', 'Dashboard', active) +
+      navItem('grammar', 'book-open', 'Grammar', active) +
+      navItem('vocabulary', 'languages', 'Vocabulary', active) +
+      '<div class="nav-label">Perkembangan</div>' +
+      navItem('progress', 'chart', 'Progres', active) +
+      navItem('achievements', 'award', 'Pencapaian', active) +
+      navItem('leaderboard', 'trophy', 'Peringkat', active) +
+      (isAdmin()
+        ? '<div class="nav-label">Admin</div>' + navItem('admin', 'shield', 'Panel admin', active, adminPendingCount())
+        : '') +
+      '<div class="nav-label">Lainnya</div>' +
+      '<button class="nav-item" data-action="search">' + icon('search') + ' Cari materi <span class="nav-count">Ctrl K</span></button>' +
+      '<button class="nav-item" data-action="settings">' + icon('settings') + ' Pengaturan</button>' +
+      '<button class="nav-item" data-action="refresh-app">' + icon('rotate') + ' Muat ulang data</button>' +
+      (donationOn() ? '<button class="nav-item nav-item--donate" data-action="donate">' + icon('heart') + ' Dukung DIXIGRAM</button>' : '') +
+    '</nav>' +
+    '<div class="sidebar-foot">' +
+      '<div class="side-streak">' +
+        '<div class="side-streak-head">' + icon('flame') + ' Streak belajar</div>' +
+        '<div class="side-streak-value"><strong>' + formatNumber(profile.streak || 0) + '</strong><span>hari</span></div>' +
+        '<div class="side-streak-days" aria-hidden="true">' + streakDays + '</div>' +
+      '</div>' +
+      '<div class="side-profile">' +
+        avatarHTML(profile.name) +
+        '<div class="side-profile-info">' +
+          '<div class="side-profile-name">' + esc(profile.name) + '</div>' +
+          '<div class="side-profile-sub">' + (guest
+            ? (quota && quota.remaining > 0 ? quota.remaining + ' latihan tersisa' : 'Kuota tamu habis')
+            : (isPending() ? 'Menunggu validasi admin' : (isAdmin() ? 'Admin · ' : '') + 'Level ' + profile.level + ' · ' + formatNumber(profile.xp) + ' XP')) + '</div>' +
+        '</div>' +
+        (guest
+          ? '<button class="icon-btn" data-action="open-auth" data-mode="login" title="Masuk" aria-label="Masuk">' + icon('key', 'icon-sm') + '</button>'
+          : '<button class="icon-btn" data-action="logout" title="Keluar" aria-label="Keluar">' + icon('log-out', 'icon-sm') + '</button>') +
+      '</div>' +
+    '</div>' +
+  '</aside>';
+}
+
+function navItem(route, iconName, label, active, badge) {
+  var lessonTrack = DIXI_STATE.route.name === 'lesson' ? DIXI_STATE.route.params.track : '';
+  var isActive = active === route || (active === 'lesson' && lessonTrack === route);
+  return '<a class="nav-item ' + (isActive ? 'is-active' : '') + '" href="#/' + route + '" data-route="#/' + route + '"' +
+    (isActive ? ' aria-current="page"' : '') + '>' +
+    icon(iconName) + ' ' + label +
+    (badge !== undefined ? '<span class="nav-badge" data-admin-badge' + (badge ? '' : ' hidden') + '>' + (badge || '') + '</span>' : '') +
+  '</a>';
+}
+
+function topbarHTML() {
+  var profile = getViewProfile();
+  var guest = isGuest();
+  var streak = profile.streak || 0;
+
+  return '<header class="topbar">' +
+    '<a class="brand brand--sm topbar-mobile-brand" href="#/dashboard" data-route="#/dashboard" aria-label="DIXIGRAM">' +
+      logoMarkHTML() +
+      '<span class="brand-copy"><span class="brand-name">DIXIGRAM</span></span>' +
+    '</a>' +
+    '<button class="topbar-search" data-action="search" aria-label="Cari materi">' +
+      icon('search') + '<span>Cari materi atau topik…</span><kbd>Ctrl K</kbd>' +
+    '</button>' +
+    '<div class="topbar-actions">' +
+      '<button class="icon-btn topbar-search-btn" data-action="search" aria-label="Cari materi">' + icon('search') + '</button>' +
+      '<span class="topbar-streak" title="Streak belajar">' + icon('flame') + streak + '</span>' +
+      refreshButtonHTML() +
+      adminBellHTML() +
+      (donationOn() ? '<button class="icon-btn topbar-donate" data-action="donate" title="Dukung DIXIGRAM" aria-label="Donasi">' + icon('heart') + '</button>' : '') +
+      themeSwitchHTML() +
+      fullscreenButtonHTML() +
+      '<span class="topbar-divider"></span>' +
+      '<div class="avatar-wrap">' +
+        '<button class="avatar-btn" data-action="user-menu" aria-label="Menu pengguna" aria-haspopup="true">' +
+          avatarHTML(profile.name) + icon('chevron-down', 'icon-xs') +
+        '</button>' +
+        userMenuHTML(profile, guest) +
+      '</div>' +
+    '</div>' +
+  '</header>';
+}
+
+function userMenuHTML(profile, guest) {
+  return '<div class="user-menu ' + (DIXI_STATE.userMenuOpen ? 'is-open' : '') + '" role="menu">' +
+    '<div class="user-menu-head">' +
+      '<strong>' + esc(profile.name) + '</strong>' +
+      '<span>' + (guest ? 'Mode tamu · progress lokal' : esc(profile.email)) + '</span>' +
+      (!guest ? '<span class="status-pill status-pill--' + (isPending() ? 'pending' : 'active') + '">' + (isPending() ? 'Menunggu validasi' : (isAdmin() ? 'Admin' : 'Aktif')) + '</span>' : '') +
+    '</div>' +
+    (guest
+      ? '<button class="user-menu-item" data-action="open-auth" data-mode="login">' + icon('key') + ' Masuk</button>' +
+        '<button class="user-menu-item" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Daftar gratis</button>'
+      : (isAdmin() ? '<button class="user-menu-item" data-action="admin-notif">' + icon('bell') + ' Pendaftar baru' +
+            '<span class="nav-badge" data-admin-badge' + (adminPendingCount() ? '' : ' hidden') + '>' + adminPendingCount() + '</span></button>' +
+            '<button class="user-menu-item" data-route="#/admin">' + icon('shield') + ' Panel admin</button>' : '') +
+        (isPending() ? '<button class="user-menu-item" data-action="check-status">' + icon('rotate') + ' Cek status validasi</button>' : '') +
+        '<button class="user-menu-item" data-route="#/progress">' + icon('chart') + ' Progres saya</button>' +
+        '<button class="user-menu-item" data-action="settings">' + icon('settings') + ' Pengaturan</button>') +
+    '<button class="user-menu-item" data-action="toggle-theme">' + icon(DIXI_STATE.theme === 'dark' ? 'sun' : 'moon') + ' Ganti tema</button>' +
+    '<button class="user-menu-item" data-action="refresh-app">' + icon('rotate') + ' Muat ulang data</button>' +
+    (donationOn() ? '<button class="user-menu-item user-menu-item--donate" data-action="donate">' + icon('heart') + ' Donasi</button>' : '') +
+    (guest
+      ? ''
+      : '<button class="user-menu-item user-menu-item--danger" data-action="logout">' + icon('log-out') + ' Keluar</button>') +
+  '</div>';
+}
+
+function themeSwitchHTML() {
+  return '<button class="theme-switch" type="button" role="switch" aria-checked="' + (DIXI_STATE.theme === 'dark') + '" aria-label="Mode gelap" data-action="toggle-theme" title="Ganti tema">' +
+    '<span class="ts-icon ts-sun">' + icon('sun') + '</span>' +
+    '<span class="ts-icon ts-moon">' + icon('moon') + '</span>' +
+    '<span class="ts-knob" aria-hidden="true"></span>' +
+  '</button>';
+}
+
+function fullscreenButtonHTML() {
+  var active = isFullscreenActive();
+  return '<button class="icon-btn" data-action="toggle-fullscreen" data-fullscreen-btn title="Layar penuh" aria-label="Layar penuh">' +
+    icon(active ? 'minimize' : 'maximize') + '</button>';
+}
+
+function bottomNavHTML(active) {
+  var items = [
+    { route: 'dashboard', icon: 'dashboard', label: 'Beranda' },
+    { route: 'grammar', icon: 'book-open', label: 'Grammar' },
+    { route: 'vocabulary', icon: 'languages', label: 'Vocab' },
+    { route: 'progress', icon: 'chart', label: 'Progres' },
+    isAdmin()
+      ? { route: 'admin', icon: 'shield', label: 'Admin', badge: adminPendingCount() }
+      : { route: 'leaderboard', icon: 'trophy', label: 'Rank' }
+  ];
+  var lessonTrack = DIXI_STATE.route.name === 'lesson' ? DIXI_STATE.route.params.track : '';
+  return '<nav class="bottom-nav" aria-label="Navigasi bawah"><div class="bottom-nav-inner">' +
+    items.map(function (item) {
+      var isActive = active === item.route || (active === 'lesson' && lessonTrack === item.route);
+      return '<a class="bottom-nav-item ' + (isActive ? 'is-active' : '') + '" href="#/' + item.route + '" data-route="#/' + item.route + '"' +
+        (isActive ? ' aria-current="page"' : '') + '>' +
+        icon(item.icon) + '<span>' + item.label + '</span>' +
+        (item.badge !== undefined ? '<i class="bottom-nav-badge" data-admin-badge' + (item.badge ? '' : ' hidden') + '>' + (item.badge || '') + '</i>' : '') + '</a>';
+    }).join('') +
+  '</div></nav>';
+}
+
+function zenFabHTML() {
+  return '<button class="zen-fab" data-action="toggle-fullscreen" aria-label="Keluar dari mode fokus">' + icon('minimize') + '</button>';
+}
+
+function pendingBannerHTML() {
+  var q = guestQuota() || { remaining: 0, limit: 0 };
+  return '<div class="guest-banner guest-banner--pending">' +
+    '<span class="gb-icon">' + icon('clock') + '</span>' +
+    '<div class="guest-banner-text"><strong>Akunmu menunggu validasi admin.</strong> ' +
+      'Sambil menunggu, kamu bisa mencoba modul gratis (' + q.remaining + ' dari ' + q.limit + ' latihan tersisa hari ini). ' +
+      'Progress-mu sudah tersimpan di akun.' +
+    '</div>' +
+    '<button class="btn btn-ghost btn-sm" data-action="check-status">' + icon('rotate') + ' Cek status</button>' +
+  '</div>';
+}
+
+function announcementHTML() {
+  var s = getSettingsPublic();
+  var text = String(s.announcement || '').trim();
+  if (!text) return '';
+  var dismissed = '';
+  try { dismissed = localStorage.getItem(DIXI_ANNOUNCE_KEY) || ''; } catch (err) { dismissed = ''; }
+  if (dismissed === text) return '';
+  var tone = s.announcementTone === 'success' || s.announcementTone === 'warning' ? s.announcementTone : 'info';
+  return '<div class="announce announce--' + tone + '" role="status">' +
+    '<span class="announce-icon">' + icon(tone === 'warning' ? 'alert' : (tone === 'success' ? 'sparkles' : 'info')) + '</span>' +
+    '<div class="announce-text"><strong>Pengumuman</strong><span>' + esc(text) + '</span></div>' +
+    '<button class="icon-btn announce-close" data-action="dismiss-announcement" aria-label="Tutup pengumuman">' + icon('x') + '</button>' +
+  '</div>';
+}
+
+function guestBannerHTML() {
+  if (!isGuest()) return '';
+  var q = guestQuota() || { remaining: 0, limit: 2 };
+  var exhausted = q.remaining <= 0;
+  return '<div class="guest-banner">' +
+    '<span class="gb-icon">' + icon(exhausted ? 'lock' : 'sparkles') + '</span>' +
+    '<div class="guest-banner-text"><strong>Mode tamu.</strong> ' +
+      (exhausted
+        ? 'Kuota latihan hari ini sudah habis.'
+        : 'Kamu punya <strong>' + q.remaining + ' dari ' + q.limit + '</strong> latihan gratis hari ini.') +
+      ' Daftar gratis untuk membuka ' + getAllModules().length + ' modul dan latihan tanpa batas.' +
+    '</div>' +
+    '<button class="btn btn-lime btn-sm" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Full access</button>' +
+  '</div>';
+}
+
+/* =========================================================================
+   MODAL SYSTEM
+   ========================================================================= */
+
+function openModal(options) {
+  var opts = options || {};
+  var root = document.getElementById('modal-root');
+  if (!root) return;
+  closeUserMenu();
+  closeLandingMenu();
+  var previousFocus = document.activeElement;
+
+  DIXI_STATE.modal = {
+    closable: opts.closable !== false,
+    onClose: opts.onClose || null,
+    returnFocus: previousFocus
+  };
+
+  var cardClass = 'modal-card ' + (opts.cardClass || '');
+  var inner;
+
+  if (opts.raw) {
+    inner = '<section class="' + cardClass + '" role="dialog" aria-modal="true" aria-label="' + esc(opts.ariaLabel || 'Dialog') + '">' +
+      opts.raw + '</section>';
+  } else {
+    inner = '<section class="' + cardClass + '" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
+      '<div class="modal-head">' +
+        '<div class="modal-head-copy">' +
+          '<h2 class="modal-title" id="modal-title">' + esc(opts.title || '') + '</h2>' +
+          (opts.subtitle ? '<p class="modal-sub">' + esc(opts.subtitle) + '</p>' : '') +
+        '</div>' +
+        (opts.closable === false ? '' : '<button class="modal-close" data-action="close-modal" aria-label="Tutup dialog">' + icon('x') + '</button>') +
+      '</div>' +
+      '<div class="modal-body">' + (opts.body || '') + '</div>' +
+      (opts.actions ? '<div class="modal-actions">' + opts.actions + '</div>' : '') +
+    '</section>';
+  }
+
+  root.innerHTML = '<div class="modal-backdrop" data-modal-backdrop>' + inner + '</div>';
+  document.body.classList.add('modal-open');
+
+  requestAnimationFrame(function () {
+    if (opts.focus !== false) {
+      var focusTarget = root.querySelector('[autofocus]') || root.querySelector('.modal-close, button, [href]');
+      if (focusTarget) {
+        try { focusTarget.focus({ preventScroll: true }); } catch (err) { focusTarget.focus(); }
+      }
+    }
+    if (typeof opts.onMount === 'function') opts.onMount(root);
+  });
+}
+
+function closeModal() {
+  var root = document.getElementById('modal-root');
+  var state = DIXI_STATE.modal;
+  if (!root || !state) return;
+  root.innerHTML = '';
+  document.body.classList.remove('modal-open');
+  DIXI_STATE.modal = null;
+  if (state.onClose) {
+    try { state.onClose(); } catch (err) { /* abaikan */ }
+  }
+  if (state.returnFocus && typeof state.returnFocus.focus === 'function') {
+    try { state.returnFocus.focus({ preventScroll: true }); } catch (err) { /* abaikan */ }
+  }
+}
+
+function confirmDialog(options) {
+  var opts = options || {};
+  openModal({
+    cardClass: 'modal-card--sm',
+    title: opts.title || 'Konfirmasi',
+    body: '<div class="confirm-body">' +
+      '<div class="confirm-icon ' + (opts.danger ? 'confirm-icon--danger' : '') + '">' + icon(opts.icon || (opts.danger ? 'alert' : 'info')) + '</div>' +
+      '<div class="confirm-copy">' + (opts.message || '') + '</div>' +
+    '</div>',
+    actions:
+      '<button class="btn btn-ghost" data-action="close-modal">' + esc(opts.cancelLabel || 'Batal') + '</button>' +
+      '<button class="btn ' + (opts.danger ? 'btn-danger' : 'btn-primary') + '" data-action="confirm-yes">' + esc(opts.confirmLabel || 'Lanjutkan') + '</button>',
+    onMount: function () {
+      var confirmBtn = document.querySelector('[data-action="confirm-yes"]');
+      if (confirmBtn && opts.onConfirm) {
+        confirmBtn.addEventListener('click', function () {
+          var collected = typeof opts.collect === 'function' ? opts.collect() : undefined;
+          closeModal();
+          setTimeout(function () { opts.onConfirm(collected); }, 60);
+        }, { once: true });
+      }
+    }
+  });
+}
+
+function setFormError(message) {
+  var box = document.getElementById('auth-error') || document.getElementById('settings-error') || document.querySelector('.form-error');
+  if (!box) {
+    toast('Terjadi kesalahan', message, 'error');
+    return;
+  }
+  box.innerHTML = icon('circle-x') + '<span>' + esc(message) + '</span>';
+  box.classList.add('is-visible');
+}
+
+function clearFormError() {
+  document.querySelectorAll('.form-error').forEach(function (box) {
+    box.classList.remove('is-visible');
+    box.innerHTML = '';
+  });
+}
+
+function setButtonLoading(button, loading, loadingLabel) {
+  if (!button) return;
+  if (loading) {
+    button.dataset.originalHtml = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner"></span> ' + esc(loadingLabel || 'Memproses…');
+  } else {
+    button.disabled = false;
+    if (button.dataset.originalHtml) button.innerHTML = button.dataset.originalHtml;
+  }
+}
+
+/* =========================================================================
+   AUTH
+   ========================================================================= */
+
+function openAuth(mode) {
+  var tab = mode === 'register' ? 'register' : 'login';
+  var isRegister = tab === 'register';
+
+  var art = '<aside class="auth-art">' +
+    '<div class="auth-art-orb" aria-hidden="true"></div>' +
+    brandHTML({ link: false }) +
+    '<div class="auth-art-body">' +
+      '<h3>Belajar dengan<br><span>ritme kamu sendiri.</span></h3>' +
+      '<p>Satu akun membuka semua modul, progress permanen, XP, streak, dan papan peringkat.</p>' +
+      '<ul class="auth-art-list">' +
+        '<li>' + icon('check') + ' ' + ((DIXI_STATE.boot && DIXI_STATE.boot.stats && DIXI_STATE.boot.stats.modules) || 24) + ' modul · ' +
+          ((DIXI_STATE.boot && DIXI_STATE.boot.stats && DIXI_STATE.boot.stats.questions) || 192) + ' soal latihan</li>' +
+        '<li>' + icon('check') + ' Grammar & vocabulary level A1–B2</li>' +
+        '<li>' + icon('check') + ' XP, level, dan streak harian</li>' +
+        (getSettingsPublic().requireApproval ? '<li>' + icon('shield') + ' Akun divalidasi admin agar komunitas tetap aman</li>' : '') +
+      '</ul>' +
+      '<div class="auth-art-foot">Gratis · tanpa kartu kredit · dibuat dengan Google Apps Script</div>' +
+    '</div>' +
+  '</aside>';
+
+  var settings = getSettingsPublic();
+  var closed = isRegister && !settings.registrationOpen;
+  var approvalNote = isRegister && settings.requireApproval && !closed
+    ? '<div class="form-note">' + icon('shield') + '<span>Akun baru <strong>divalidasi admin</strong> sebelum semua modul terbuka. Sambil menunggu, kamu tetap bisa masuk dan mencoba modul gratis.</span></div>'
+    : '';
+  var closedNote = closed
+    ? '<div class="form-note form-note--warn">' + icon('lock') + '<span>Pendaftaran akun baru sedang <strong>ditutup</strong> oleh admin. Sudah punya akun? Silakan masuk.</span></div>'
+    : '';
+  var form = '<section class="auth-form-panel">' +
+    '<button class="modal-close auth-close" data-action="close-modal" aria-label="Tutup">' + icon('x') + '</button>' +
+    '<div class="auth-mobile-head">' + brandHTML({ link: false, size: 'sm' }) + '</div>' +
+    '<div class="auth-tabs" role="tablist" aria-label="Pilih masuk atau daftar">' +
+      '<button class="auth-tab ' + (!isRegister ? 'is-active' : '') + '" data-action="auth-tab" data-mode="login" role="tab" aria-selected="' + (!isRegister) + '">Masuk</button>' +
+      '<button class="auth-tab ' + (isRegister ? 'is-active' : '') + '" data-action="auth-tab" data-mode="register" role="tab" aria-selected="' + isRegister + '">Daftar</button>' +
+    '</div>' +
+    '<h2 class="auth-form-title">' + (isRegister ? 'Buat akun gratis' : 'Selamat datang kembali') + '</h2>' +
+    '<p class="auth-form-sub">' + (isRegister ? 'Buka semua modul dan simpan progress-mu.' : 'Masuk untuk melanjutkan petualanganmu.') + '</p>' +
+    approvalNote + closedNote +
+    '<form id="auth-form" class="auth-form" data-mode="' + tab + '" novalidate>' +
+      (isRegister
+        ? '<div class="field"><label for="auth-name">Nama</label><div class="input-shell">' + icon('user') +
+          '<input class="input" id="auth-name" name="name" type="text" autocomplete="name" maxlength="40" placeholder="Nama kamu" required' + (closed ? ' disabled' : '') + '></div>' +
+          '<span class="field-hint">Nama ini tampil di papan peringkat.</span></div>'
+        : '') +
+      '<div class="field"><label for="auth-email">Email</label><div class="input-shell">' + icon('mail') +
+        '<input class="input" id="auth-email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="kamu@email.com" required></div></div>' +
+      '<div class="field"><label for="auth-password">Password</label><div class="input-shell">' + icon('key') +
+        '<input class="input" id="auth-password" name="password" type="password" autocomplete="' + (isRegister ? 'new-password' : 'current-password') + '" placeholder="Minimal 8 karakter" required>' +
+        '<button class="input-action" type="button" data-action="toggle-password" data-target="auth-password" aria-label="Tampilkan password">' + icon('eye') + '</button></div>' +
+        (isRegister ? '<span class="field-hint">Minimal 8 karakter, kombinasi huruf dan angka.</span>' : '') +
+      '</div>' +
+      '<div class="form-error" id="auth-error" role="alert"></div>' +
+      '<button class="btn btn-primary btn-block" id="auth-submit" type="submit"' + (closed ? ' disabled' : '') + '>' +
+        (isRegister ? icon('sparkles') + ' Buat akun & mulai' : icon('arrow-right') + ' Masuk') +
+      '</button>' +
+    '</form>' +
+    '<div class="auth-switch">' + (isRegister ? 'Sudah punya akun?' : 'Belum punya akun?') +
+      ' <button type="button" data-action="auth-tab" data-mode="' + (isRegister ? 'login' : 'register') + '">' + (isRegister ? 'Masuk' : 'Daftar gratis') + '</button>' +
+    '</div>' +
+    '<p class="auth-legal">Dengan melanjutkan, kamu setuju progress dan nama tampilan disimpan di database DIXIGRAM.</p>' +
+  '</section>';
+
+  openModal({
+    cardClass: 'modal-card--auth',
+    raw: '<div class="auth-layout">' + art + form + '</div>',
+    ariaLabel: isRegister ? 'Daftar akun DIXIGRAM' : 'Masuk ke DIXIGRAM',
+    focus: false,
+    onMount: function (root) {
+      // Fokus otomatis hanya di desktop: di ponsel keyboard yang langsung muncul
+      // membuat layar bergeser dan tombol terasa "tidak bereaksi".
+      if (!(window.matchMedia && window.matchMedia('(pointer:fine)').matches)) return;
+      var first = root.querySelector('#auth-name:not([disabled])') || root.querySelector('#auth-email');
+      if (first) { try { first.focus({ preventScroll: true }); } catch (err) { first.focus(); } }
+    }
+  });
+}
+
+function handleAuthSubmit(form) {
+  var mode = form.dataset.mode === 'register' ? 'register' : 'login';
+  var email = String((form.querySelector('#auth-email') || {}).value || '').trim();
+  var password = String((form.querySelector('#auth-password') || {}).value || '');
+  var name = String((form.querySelector('#auth-name') || {}).value || '').trim();
+  var button = form.querySelector('#auth-submit');
+
+  clearFormError();
+  if (!email || !password) {
+    setFormError('Email dan password wajib diisi.');
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+    setFormError('Alamat email belum valid.');
+    return;
+  }
+  if (mode === 'register') {
+    if (name.length < 2) {
+      setFormError('Nama minimal 2 karakter.');
+      return;
+    }
+    if (password.length < 8) {
+      setFormError('Password minimal 8 karakter.');
+      return;
+    }
+    if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+      setFormError('Password harus mengandung huruf dan angka.');
+      return;
+    }
+  }
+
+  if (DIXI_STATE.authBusy) return;
+  DIXI_STATE.authBusy = true;
+  setButtonLoading(button, true, mode === 'register' ? 'Membuat akun…' : 'Masuk…');
+  form.querySelectorAll('input').forEach(function (input) { input.readOnly = true; });
+  var action = mode === 'register' ? 'apiRegister' : 'apiLogin';
+  var payload = mode === 'register'
+    ? { name: name, email: email, password: password, deviceId: deviceId() }
+    : { email: email, password: password, deviceId: deviceId() };
+
+  apiCall(action, payload)
+    .then(function (result) {
+      writeToken(result.token);
+      DIXI_STATE.token = result.token;
+      // v1.2: server sudah mengirim data bootstrap bersama hasil login (1x panggilan).
+      var bootPromise = result.boot ? Promise.resolve(result.boot) : apiCall('apiBootstrap', result.token);
+      return bootPromise.then(function (data) {
+        DIXI_STATE.authBusy = false;
+        applyBoot(data);
+        startHeartbeat();
+        DIXI_STATE.lesson = null;
+        DIXI_STATE.quiz = null;
+        DIXI_STATE.pendingQuiz = null;
+        closeModal();
+        navigateTo('#/dashboard');
+        var status = (result.user && result.user.status) || 'active';
+        if (status === 'pending') {
+          toast(
+            mode === 'register' ? 'Pendaftaran terkirim' : 'Masih menunggu validasi',
+            mode === 'register'
+              ? 'Akunmu menunggu validasi admin. Sambil menunggu, coba modul gratis dulu.'
+              : 'Admin belum memvalidasi akunmu. Modul gratis tetap bisa dipakai.',
+            'info', 7000
+          );
+        } else {
+          toast(
+            mode === 'register' ? 'Akun berhasil dibuat' : 'Selamat datang kembali',
+            isAdmin()
+              ? (adminPendingCount() ? adminPendingCount() + ' pendaftar menunggu validasi. Ketuk lonceng untuk meninjau.' : 'Kamu masuk sebagai admin.')
+              : (mode === 'register' ? 'Full access aktif. Semua modul sudah terbuka.' : 'Progress dan streak-mu siap dilanjutkan.'),
+            'success'
+          );
+        }
+      });
+    })
+    .catch(function (err) {
+      DIXI_STATE.authBusy = false;
+      form.querySelectorAll('input').forEach(function (input) { input.readOnly = false; });
+      setFormError(err.message || 'Tidak bisa memproses akun.');
+      setButtonLoading(button, false);
+    });
+}
+
+function togglePassword(button) {
+  var id = button.getAttribute('data-target');
+  var input = document.getElementById(id);
+  if (!input) return;
+  var show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  button.innerHTML = icon(show ? 'eye-off' : 'eye');
+  button.setAttribute('aria-label', show ? 'Sembunyikan password' : 'Tampilkan password');
+}
+
+/* =========================================================================
+   SETTINGS
+   ========================================================================= */
+
+function openSettings() {
+  var profile = getViewProfile();
+  var guest = isGuest();
+  var goal = guest ? readGuestProgress().goal : profile.dailyGoal;
+  DIXI_STATE.settingsGoal = goal;
+
+  var goals = [40, 80, 120, 160].map(function (value) {
+    return '<button type="button" class="goal-option ' + (value === goal ? 'is-active' : '') + '" data-action="goal-option" data-goal="' + value + '">' + value + ' XP</button>';
+  }).join('');
+
+  var body = '<form id="settings-form" class="settings-form">' +
+    '<div class="settings-section">' +
+      '<div class="account-chip">' +
+        avatarHTML(profile.name) +
+        '<div><strong>' + esc(profile.name) + '</strong><span>' + (guest ? 'Mode tamu · progress lokal' : esc(profile.email)) + '</span></div>' +
+      '</div>' +
+      (guest
+        ? '<div class="result-upsell" style="margin-top:12px;">' + icon('lock') +
+            '<div><strong>Masih mode tamu</strong><span>Daftar gratis untuk progress permanen dan semua modul.</span></div>' +
+            '<button type="button" class="btn btn-lime btn-sm" data-action="open-auth" data-mode="register">Daftar</button>' +
+          '</div>'
+        : '<div class="field" style="margin-top:12px;"><label for="settings-name">Nama tampilan</label><div class="input-shell">' + icon('user') +
+            '<input class="input" id="settings-name" name="name" maxlength="40" value="' + esc(profile.name) + '" autocomplete="name"></div></div>') +
+    '</div>' +
+    '<div class="settings-section">' +
+      '<div class="settings-section-title">' + icon('target') + ' Target harian</div>' +
+      '<p class="settings-section-sub">Pilih target XP yang realistis. Misi harian menyesuaikan target ini.</p>' +
+      '<div class="goal-options">' + goals + '</div>' +
+      '<input type="hidden" id="settings-goal" value="' + goal + '">' +
+    '</div>' +
+    '<div class="settings-section">' +
+      '<div class="settings-section-title">' + icon('palette') + ' Tampilan</div>' +
+      '<div class="settings-row settings-row--stack"><div class="settings-row-main"><strong>Ukuran teks</strong><span>Perbesar huruf agar lebih nyaman dibaca, terutama di ponsel.</span></div>' +
+        '<div class="segmented" role="radiogroup" aria-label="Ukuran teks">' +
+          [['md', 'Normal'], ['lg', 'Besar'], ['xl', 'Ekstra']].map(function (opt) {
+            var on = DIXI_STATE.textSize === opt[0];
+            return '<button type="button" class="segmented-item ' + (on ? 'is-active' : '') + '" role="radio" aria-checked="' + on + '" data-action="text-size" data-size="' + opt[0] + '">' +
+              '<span class="seg-aa seg-aa--' + opt[0] + '">Aa</span>' + opt[1] + '</button>';
+          }).join('') +
+        '</div></div>' +
+      '<div class="settings-row"><div class="settings-row-main"><strong>Tema</strong><span>Mode gelap atau terang.</span></div>' + themeSwitchHTML() + '</div>' +
+      '<div class="settings-row"><div class="settings-row-main"><strong>Layar penuh</strong><span>Mode fokus tanpa gangguan.</span></div>' +
+        '<button type="button" class="icon-btn" data-action="toggle-fullscreen" data-fullscreen-btn aria-label="Layar penuh">' + icon(isFullscreenActive() ? 'minimize' : 'maximize') + '</button></div>' +
+    '</div>' +
+    '<div class="form-error" id="settings-error" role="alert"></div>' +
+    '<div class="settings-section">' +
+      '<div class="settings-section-title">' + icon('info') + ' Akun & data</div>' +
+      (guest
+        ? '<button type="button" class="btn btn-ghost btn-block" data-action="reset-guest">' + icon('rotate') + ' Reset progress tamu</button>'
+        : '<div class="settings-actions">' +
+            '<button type="button" class="btn btn-ghost" data-action="change-password">' + icon('key') + ' Ubah password</button>' +
+            '<button type="button" class="btn btn-danger" data-action="logout">' + icon('log-out') + ' Keluar</button>' +
+          '</div>') +
+      '<p class="settings-section-sub" style="margin:9px 0 0;">' + (guest ? 'Data tamu hanya tersimpan di browser ini.' : 'Progress akun tersimpan di Google Sheets milik aplikasi.') + '</p>' +
+    '</div>' +
+  '</form>';
+
+  openModal({
+    title: 'Pengaturan',
+    subtitle: 'Atur ritme belajar dan tampilan DIXIGRAM.',
+    cardClass: 'modal-card--lg',
+    body: body,
+    actions:
+      '<button class="btn btn-ghost" data-action="close-modal">Batal</button>' +
+      '<button class="btn btn-primary" type="submit" form="settings-form" id="settings-save">' + icon('check') + ' Simpan</button>',
+    onMount: function () { /* tidak memaksa fokus agar keyboard ponsel tidak langsung muncul */ }
+  });
+}
+
+function openChangePassword() {
+  openModal({
+    title: 'Ubah password',
+    subtitle: 'Setelah diganti, sesi di perangkat lain otomatis keluar.',
+    cardClass: 'modal-card--sm',
+    body: '<form id="password-form" class="auth-form" novalidate>' +
+      '<div class="field"><label for="pw-current">Password saat ini</label><div class="input-shell">' + icon('key') +
+        '<input class="input" id="pw-current" type="password" autocomplete="current-password" required>' +
+        '<button class="input-action" type="button" data-action="toggle-password" data-target="pw-current" aria-label="Tampilkan password">' + icon('eye') + '</button></div></div>' +
+      '<div class="field"><label for="pw-next">Password baru</label><div class="input-shell">' + icon('shield') +
+        '<input class="input" id="pw-next" type="password" autocomplete="new-password" required>' +
+        '<button class="input-action" type="button" data-action="toggle-password" data-target="pw-next" aria-label="Tampilkan password">' + icon('eye') + '</button></div>' +
+        '<span class="field-hint">Minimal 8 karakter, kombinasi huruf dan angka.</span></div>' +
+      '<div class="field"><label for="pw-confirm">Ulangi password baru</label><div class="input-shell">' + icon('shield') +
+        '<input class="input" id="pw-confirm" type="password" autocomplete="new-password" required></div></div>' +
+      '<div class="form-error" id="password-error" role="alert"></div>' +
+    '</form>',
+    actions:
+      '<button class="btn btn-ghost" data-action="close-modal">Batal</button>' +
+      '<button class="btn btn-primary" type="submit" form="password-form" id="password-save">' + icon('check') + ' Simpan</button>'
+  });
+}
+
+function handlePasswordSubmit(form) {
+  var current = String((form.querySelector('#pw-current') || {}).value || '');
+  var next = String((form.querySelector('#pw-next') || {}).value || '');
+  var confirmValue = String((form.querySelector('#pw-confirm') || {}).value || '');
+  var button = document.getElementById('password-save');
+  var box = document.getElementById('password-error');
+  function fail(message) {
+    if (box) { box.innerHTML = icon('circle-x') + '<span>' + esc(message) + '</span>'; box.classList.add('is-visible'); }
+  }
+  if (box) box.classList.remove('is-visible');
+  if (!current || !next) return fail('Isi password saat ini dan password baru.');
+  if (next.length < 8 || !/[A-Za-z]/.test(next) || !/[0-9]/.test(next)) return fail('Password baru minimal 8 karakter, berisi huruf dan angka.');
+  if (next !== confirmValue) return fail('Konfirmasi password baru belum sama.');
+
+  setButtonLoading(button, true, 'Menyimpan…');
+  apiCall('apiChangePassword', DIXI_STATE.token, current, next)
+    .then(function (result) {
+      writeToken(result.token);
+      DIXI_STATE.token = result.token;
+      closeModal();
+      toast('Password diganti', 'Perangkat lain sudah dikeluarkan dari akunmu.', 'success');
+    })
+    .catch(function (err) {
+      fail(err.message || 'Password belum bisa diganti.');
+      setButtonLoading(button, false);
+    });
+}
+
+function handleGoalOption(button) {
+  var value = Number(button.getAttribute('data-goal')) || 80;
+  DIXI_STATE.settingsGoal = value;
+  var hidden = document.getElementById('settings-goal');
+  if (hidden) hidden.value = String(value);
+  document.querySelectorAll('.goal-option').forEach(function (b) {
+    b.classList.toggle('is-active', Number(b.getAttribute('data-goal')) === value);
+  });
+}
+
+function handleSettingsSubmit(form) {
+  var goal = Number((form.querySelector('#settings-goal') || {}).value || DIXI_STATE.settingsGoal) || 80;
+  var nameInput = form.querySelector('#settings-name');
+  var name = nameInput ? String(nameInput.value || '').trim() : '';
+  var button = document.getElementById('settings-save');
+  var guest = isGuest();
+  clearFormError();
+
+  if (!guest && name.length < 2) {
+    setFormError('Nama minimal 2 karakter.');
+    return;
+  }
+  if (goal < 20 || goal > 300) {
+    setFormError('Target harian harus antara 20–300 XP.');
+    return;
+  }
+
+  setButtonLoading(button, true, 'Menyimpan…');
+
+  if (guest) {
+    var g = readGuestProgress();
+    g.goal = goal;
+    saveGuestProgress(g);
+    closeModal();
+    renderRoute();
+    toast('Pengaturan disimpan', 'Target harian tamu diperbarui.', 'success');
+    return;
+  }
+
+  var jobs = [];
+  if (name && name !== getViewProfile().name) jobs.push(apiCall('apiUpdateName', DIXI_STATE.token, name));
+  if (goal !== getViewProfile().dailyGoal) jobs.push(apiCall('apiUpdateGoal', DIXI_STATE.token, goal));
+
+  Promise.all(jobs)
+    .then(function (results) {
+      results.forEach(function (result) {
+        if (result && result.profile && DIXI_STATE.boot) DIXI_STATE.boot.profile = result.profile;
+      });
+      return apiCall('apiBootstrap', DIXI_STATE.token);
+    })
+    .then(function (data) {
+      applyBoot(data);
+      closeModal();
+      renderRoute();
+      toast('Pengaturan disimpan', 'Perubahan profil dan target harian sudah aktif.', 'success');
+    })
+    .catch(function (err) {
+      setFormError(err.message || 'Tidak bisa menyimpan pengaturan.');
+      setButtonLoading(button, false);
+    });
+}
+
+/* =========================================================================
+   SEARCH / COMMAND PALETTE
+   ========================================================================= */
+
+function openSearch() {
+  DIXI_STATE.searchQuery = '';
+  openModal({
+    title: 'Cari & perintah',
+    subtitle: 'Lompat ke materi atau jalankan aksi dengan cepat.',
+    cardClass: 'search-modal',
+    body: '<div class="search-field">' + icon('search') +
+      '<input id="search-input" type="text" placeholder="Cari modul, topik, atau aksi…" aria-label="Cari materi atau perintah" autocomplete="off" spellcheck="false" autofocus>' +
+      '<kbd style="font-size:9px;color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:1px 5px;">Esc</kbd></div>' +
+      '<div class="search-results" id="search-results"></div>',
+    onMount: function () {
+      refreshSearchResults();
+    }
+  });
+}
+
+function refreshSearchResults() {
+  var box = document.getElementById('search-results');
+  if (!box) return;
+  var query = normalizeText(DIXI_STATE.searchQuery);
+  var modules = getAllModules().filter(function (m) {
+    if (!query) return true;
+    return normalizeText(m.title + ' ' + m.subtitle + ' ' + m.description + ' ' + m.level + ' ' + m.track).indexOf(query) !== -1;
+  }).slice(0, query ? 8 : 6);
+
+  var actions = [
+    { label: 'Dashboard', icon: 'dashboard', route: '#/dashboard' },
+    { label: 'Progres saya', icon: 'chart', route: '#/progress' },
+    { label: 'Pencapaian', icon: 'award', route: '#/achievements' },
+    { label: 'Papan peringkat', icon: 'trophy', route: '#/leaderboard' },
+    { label: 'Ganti tema', icon: DIXI_STATE.theme === 'dark' ? 'sun' : 'moon', action: 'toggle-theme' },
+    { label: 'Layar penuh', icon: 'maximize', action: 'toggle-fullscreen' }
+  ].filter(function (a) {
+    return !query || normalizeText(a.label).indexOf(query) !== -1;
+  });
+
+  var html = '';
+  if (modules.length) {
+    html += '<div class="search-group-label">Materi</div>' + modules.map(function (m) {
+      var locked = m.locked;
+      var inner = '<span class="track-icon track-' + (m.track === 'grammar' ? 'grammar' : 'vocabulary') + '">' + icon(m.icon) + '</span>' +
+        '<span class="search-item-main"><strong>' + esc(m.title) + '</strong><span>' + esc(m.subtitle) + ' · ' + m.level + '</span></span>' +
+        (locked ? '<span class="chip chip--sm">' + icon('lock') + ' Member</span>' : icon('arrow-right', 'icon-arrow'));
+      return locked
+        ? '<button type="button" class="search-item" data-action="locked-module" data-title="' + esc(m.title) + '">' + inner + '</button>'
+        : '<button type="button" class="search-item" data-route="#/lesson/' + m.track + '/' + m.id + '">' + inner + '</button>';
+    }).join('');
+  }
+
+  if (actions.length) {
+    html += '<div class="search-group-label">Aksi cepat</div>' + actions.map(function (a) {
+      return '<button type="button" class="search-item" ' + (a.route ? 'data-route="' + a.route + '"' : 'data-action="' + a.action + '"') + '>' +
+        '<span class="track-icon track-grammar">' + icon(a.icon) + '</span>' +
+        '<span class="search-item-main"><strong>' + esc(a.label) + '</strong><span>Perintah aplikasi</span></span>' +
+        icon('arrow-right', 'icon-arrow') + '</button>';
+    }).join('');
+  }
+
+  if (!html) {
+    html = '<div class="search-empty">' + icon('search', 'icon-lg') + '<div style="margin-top:8px;">Tidak ada hasil untuk “' + esc(DIXI_STATE.searchQuery) + '”.</div></div>';
+  }
+  box.innerHTML = html;
+}
+
+/* =========================================================================
+   UPSELL / LOGOUT
+   ========================================================================= */
+
+function openUpsell(reason, moduleTitle) {
+  if (isPending() || reason === 'pending') {
+    var q = guestQuota() || { remaining: 0, limit: 0 };
+    openModal({
+      cardClass: 'modal-card--sm',
+      title: 'Menunggu validasi admin',
+      subtitle: 'Akunmu sudah terdaftar dan progress tersimpan.',
+      body: '<div class="confirm-body">' +
+        '<div class="confirm-icon">' + icon('clock') + '</div>' +
+        '<div class="confirm-copy">' + (reason === 'limit'
+          ? 'Kuota latihan hari ini (' + q.limit + ') sudah terpakai. '
+          : (moduleTitle ? 'Modul "' + esc(moduleTitle) + '" ' : 'Modul ini ') + 'terbuka setelah admin memvalidasi akunmu. ') +
+          'Begitu disetujui, semua modul dan latihan tanpa batas langsung aktif.</div>' +
+      '</div>',
+      actions:
+        '<button class="btn btn-ghost" data-action="close-modal">Tutup</button>' +
+        '<button class="btn btn-primary" data-action="check-status">' + icon('rotate') + ' Cek status</button>'
+    });
+    return;
+  }
+  var title = reason === 'limit' ? 'Kuota tamu habis' : 'Materi ini khusus member';
+  var text = reason === 'limit'
+    ? 'Kamu sudah memakai semua latihan gratis hari ini. Buat akun gratis untuk lanjut tanpa batas.'
+    : 'Modul ' + (moduleTitle ? '"' + moduleTitle + '" ' : '') + 'tersedia untuk akun gratis. Progresmu akan tersimpan permanen.';
+
+  openModal({
+    cardClass: 'modal-card--sm',
+    title: title,
+    subtitle: 'Full access gratis, cukup buat akun.',
+    body: '<div class="confirm-body">' +
+      '<div class="confirm-icon">' + icon('sparkles') + '</div>' +
+      '<div class="confirm-copy">' + esc(text) + '</div>' +
+    '</div>' +
+    '<div class="access-list" style="margin:18px 0 0;">' +
+      '<li>' + icon('check') + ' ' + ((DIXI_STATE.boot && DIXI_STATE.boot.stats && DIXI_STATE.boot.stats.modules) || 24) + ' modul · ' + ((DIXI_STATE.boot && DIXI_STATE.boot.stats && DIXI_STATE.boot.stats.questions) || 192) + ' soal</li>' +
+      '<li>' + icon('check') + ' XP, level, streak, dan pencapaian</li>' +
+      '<li>' + icon('check') + ' Progres tersimpan di akun</li>' +
+    '</div>',
+    actions:
+      '<button class="btn btn-ghost" data-action="close-modal">Nanti</button>' +
+      '<button class="btn btn-primary" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Daftar gratis</button>'
+  });
+}
+
+function requestLogout() {
+  if (isGuest()) {
+    openAuth('login');
+    return;
+  }
+  confirmDialog({
+    title: 'Keluar dari DIXIGRAM?',
+    message: 'Progress akunmu tetap aman. Kamu bisa masuk lagi kapan saja' +
+      (isAdmin()
+        ? '.<label class="check-row"><input type="checkbox" id="logout-all"> <span>Keluar juga dari semua perangkat lain</span></label>'
+        : ', termasuk dari perangkat lain.'),
+    confirmLabel: 'Keluar',
+    danger: true,
+    icon: 'log-out',
+    collect: function () {
+      var box = document.getElementById('logout-all');
+      return { allDevices: !!(box && box.checked) };
+    },
+    onConfirm: function (values) { performLogout(values && values.allDevices); }
+  });
+}
+
+function performLogout(allDevices) {
+  stopHeartbeat();
+  apiCall('apiLogout', DIXI_STATE.token, !!allDevices)
+    .catch(function () { /* sesi tetap dibuang di klien */ })
+    .then(function () {
+      writeToken('');
+      DIXI_STATE.token = '';
+      DIXI_STATE.quiz = null;
+      DIXI_STATE.pendingQuiz = null;
+      DIXI_STATE.lesson = null;
+      DIXI_STATE.admin = null;
+      return apiCall('apiBootstrap', null);
+    })
+    .then(function (data) {
+      applyBoot(data);
+      navigateTo('#/');
+      toast('Kamu sudah keluar', 'Sampai jumpa lagi. Progress akunmu tetap tersimpan.', 'info');
+    })
+    .catch(function (err) {
+      toast('Gagal keluar', err.message || 'Coba lagi.', 'error');
+    });
+}
+
+function resetGuestProgress() {
+  confirmDialog({
+    title: 'Reset progress tamu?',
+    message: 'XP, streak, dan riwayat latihan lokal akan dihapus. Tindakan ini tidak bisa dibatalkan.',
+    confirmLabel: 'Reset',
+    danger: true,
+    icon: 'rotate',
+    onConfirm: function () {
+      try { localStorage.removeItem(DIXI_GUEST_KEY); } catch (err) { /* abaikan */ }
+      closeModal();
+      renderRoute();
+      toast('Progress tamu direset', 'Kamu mulai lagi dari awal di browser ini.', 'info');
+    }
+  });
+}
+
+/* =========================================================================
+   THEME / FULLSCREEN / SPEECH
+   ========================================================================= */
+
+function toggleTheme() {
+  setTheme(DIXI_STATE.theme === 'dark' ? 'light' : 'dark');
+}
+
+function setTheme(theme) {
+  DIXI_STATE.theme = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', DIXI_STATE.theme);
+  try { localStorage.setItem(DIXI_THEME_KEY, DIXI_STATE.theme); } catch (err) { /* abaikan */ }
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', DIXI_STATE.theme === 'dark' ? '#080b14' : '#f4f2ec');
+  var menuTheme = document.querySelector('.user-menu-item[data-action="toggle-theme"]');
+  if (menuTheme) menuTheme.innerHTML = icon(DIXI_STATE.theme === 'dark' ? 'sun' : 'moon') + ' Ganti tema';
+  updateThemeControls();
+}
+
+function setTextSize(size) {
+  DIXI_STATE.textSize = size === 'lg' || size === 'xl' ? size : 'md';
+  document.documentElement.setAttribute('data-text', DIXI_STATE.textSize);
+  try { localStorage.setItem(DIXI_TEXT_KEY, DIXI_STATE.textSize); } catch (err) { /* abaikan */ }
+  document.querySelectorAll('[data-action="text-size"]').forEach(function (btn) {
+    var on = btn.getAttribute('data-size') === DIXI_STATE.textSize;
+    btn.classList.toggle('is-active', on);
+    btn.setAttribute('aria-checked', String(on));
+  });
+}
+
+function updateThemeControls() {
+  document.querySelectorAll('.theme-switch').forEach(function (btn) {
+    btn.setAttribute('aria-checked', String(DIXI_STATE.theme === 'dark'));
+    btn.setAttribute('title', DIXI_STATE.theme === 'dark' ? 'Aktifkan mode terang' : 'Aktifkan mode gelap');
+  });
+}
+
+function isFullscreenActive() {
+  return !!document.fullscreenElement || document.body.classList.contains('zen-mode');
+}
+
+function updateFullscreenControls() {
+  var active = isFullscreenActive();
+  document.querySelectorAll('[data-fullscreen-btn]').forEach(function (btn) {
+    btn.innerHTML = icon(active ? 'minimize' : 'maximize');
+    btn.setAttribute('title', active ? 'Keluar layar penuh' : 'Layar penuh');
+    btn.setAttribute('aria-label', active ? 'Keluar layar penuh' : 'Layar penuh');
+  });
+  var fab = document.querySelector('.zen-fab');
+  if (fab) fab.innerHTML = icon('minimize');
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen().then(updateFullscreenControls).catch(function () {});
+    return;
+  }
+  if (document.body.classList.contains('zen-mode')) {
+    document.body.classList.remove('zen-mode');
+    updateFullscreenControls();
+    toast('Mode fokus selesai', 'Navigasi kembali ditampilkan.', 'info', 2600);
+    return;
+  }
+  var promise = document.documentElement.requestFullscreen
+    ? document.documentElement.requestFullscreen()
+    : Promise.reject(new Error('Fullscreen tidak didukung'));
+  Promise.resolve(promise)
+    .then(function () {
+      updateFullscreenControls();
+    })
+    .catch(function () {
+      document.body.classList.add('zen-mode');
+      updateFullscreenControls();
+      toast('Mode fokus aktif', 'Browser membatasi layar penuh di dalam iframe, jadi DIXIGRAM memakai mode fokus.', 'info', 4200);
+    });
+}
+
+function speakWord(word) {
+  if (!word) return;
+  if (!('speechSynthesis' in window)) {
+    toast('Audio tidak tersedia', 'Browser ini belum mendukung pelafalan otomatis.', 'warning');
+    return;
+  }
+  try {
+    window.speechSynthesis.cancel();
+    var utterance = new SpeechSynthesisUtterance(String(word));
+    utterance.lang = 'en-US';
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+    window.speechSynthesis.speak(utterance);
+  } catch (err) {
+    toast('Gagal memutar audio', 'Coba lagi.', 'warning');
+  }
+}
+
+/* =========================================================================
+   TOAST & CONFETTI
+   ========================================================================= */
+
+function toast(title, message, type, duration, action) {
+  var root = document.getElementById('toast-root');
+  if (!root) return;
+  var kind = type || 'info';
+  var iconName = kind === 'success' ? 'circle-check' : kind === 'error' ? 'circle-x' : kind === 'warning' ? 'alert' : 'info';
+  // Maksimal 3 toast sekaligus agar layar ponsel tidak tertutup.
+  while (root.children.length >= 3) root.removeChild(root.firstChild);
+  var el = document.createElement('div');
+  el.className = 'toast toast--' + kind;
+  el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+  el.innerHTML = '<span class="toast-icon">' + icon(iconName) + '</span>' +
+    '<div class="toast-main"><div class="toast-title">' + esc(title) + '</div>' +
+    (message ? '<div class="toast-msg">' + esc(message) + '</div>' : '') +
+    (action ? '<button class="toast-action" data-action="' + esc(action.action) + '" data-toast-dismiss>' + esc(action.label) + ' ' + icon('arrow-right') + '</button>' : '') +
+    '</div>' +
+    '<button class="toast-close" data-action="close-toast" aria-label="Tutup notifikasi">' + icon('x') + '</button>';
+  root.appendChild(el);
+  if (action) {
+    var actBtn = el.querySelector('[data-toast-dismiss]');
+    if (actBtn) actBtn.addEventListener('click', function () { setTimeout(function () { removeToast(el); }, 0); });
+  }
+
+  var timer = setTimeout(function () { removeToast(el); }, duration || 4800);
+  var close = el.querySelector('.toast-close');
+  if (close) close.addEventListener('click', function () { clearTimeout(timer); removeToast(el); });
+}
+
+function removeToast(el) {
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+}
+
+function launchConfetti(options) {
+  var canvas = document.getElementById('confetti');
+  if (!canvas) return;
+  var prefersReduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (prefersReduce) return;
+
+  var ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  var dpr = window.devicePixelRatio || 1;
+  var width = window.innerWidth;
+  var height = window.innerHeight;
+  dpr = Math.min(dpr, 1.5);
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + 'px';
+  canvas.style.height = height + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  var colors = ['#d8f56b', '#5eead4', '#8b5cf6', '#f472b6', '#ff8a5b', '#ffffff'];
+  // Mode ringan: partikel lebih sedikit dan durasi lebih singkat.
+  var count = Math.min(40, Math.round(((options && options.count) || 60) / 2));
+  var particles = [];
+  for (var i = 0; i < count; i++) {
+    particles.push({
+      x: width / 2 + (Math.random() - 0.5) * 180,
+      y: height * 0.36 + (Math.random() - 0.5) * 40,
+      vx: (Math.random() - 0.5) * 12,
+      vy: -Math.random() * 11 - 3,
+      g: 0.3 + Math.random() * 0.18,
+      size: 3 + Math.random() * 7,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rot: Math.random() * Math.PI,
+      vr: (Math.random() - 0.5) * 0.25,
+      life: 0,
+      maxLife: 60 + Math.random() * 30
+    });
+  }
+
+  var start = performance.now();
+  function frame(now) {
+    var elapsed = now - start;
+    ctx.clearRect(0, 0, width, height);
+    var alive = false;
+    particles.forEach(function (p) {
+      p.life++;
+      if (p.life > p.maxLife) return;
+      alive = true;
+      p.vy += p.g;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= 0.992;
+      p.rot += p.vr;
+      ctx.globalAlpha = Math.max(0, 1 - p.life / p.maxLife);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x, p.y, p.size, p.size * 0.55);
+    });
+    if (alive && elapsed < 1800) {
+      requestAnimationFrame(frame);
+    } else {
+      ctx.clearRect(0, 0, width, height);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+/* =========================================================================
+   PAGE HELPERS
+   ========================================================================= */
+
+function initReveal() {
+  var nodes = document.querySelectorAll('.reveal');
+  if (!nodes.length) return;
+  // Mode ringan (v1.2): konten langsung tampil tanpa animasi scroll.
+  if (true) {
+    nodes.forEach(function (n) { n.classList.add('is-visible'); });
+    return;
+  }
+  if (!('IntersectionObserver' in window)) {
+    nodes.forEach(function (n) { n.classList.add('is-visible'); });
+    return;
+  }
+  if (!DIXI_REVEAL_OBSERVER) {
+    DIXI_REVEAL_OBSERVER = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          DIXI_REVEAL_OBSERVER.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  }
+  nodes.forEach(function (node) {
+    if (!node.classList.contains('is-visible')) DIXI_REVEAL_OBSERVER.observe(node);
+  });
+}
+
+function scrollToId(id) {
+  var el = document.querySelector(id);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeLandingMenu() {
+  var menu = document.getElementById('landing-mobile-menu');
+  if (menu) menu.classList.remove('is-open');
+}
+
+function closeUserMenu() {
+  DIXI_STATE.userMenuOpen = false;
+  var menu = document.querySelector('.user-menu');
+  if (menu) menu.classList.remove('is-open');
+}
+
+/* =========================================================================
+   EVENT BINDING
+   ========================================================================= */
+
+function bindGlobalEvents() {
+  document.addEventListener('click', function (event) {
+    var target = event.target;
+
+    /* modal backdrop */
+    if (target.matches && target.matches('[data-modal-backdrop]') && DIXI_STATE.modal && DIXI_STATE.modal.closable) {
+      closeModal();
+      return;
+    }
+
+    /* route links */
+    var routeEl = target.closest ? target.closest('[data-route]') : null;
+    if (routeEl) {
+      event.preventDefault();
+      navigateTo(routeEl.getAttribute('data-route'));
+      return;
+    }
+
+    /* smooth scroll */
+    var scrollEl = target.closest ? target.closest('[data-scroll]') : null;
+    if (scrollEl) {
+      event.preventDefault();
+      scrollToId(scrollEl.getAttribute('data-scroll'));
+      closeLandingMenu();
+      return;
+    }
+
+    /* faq */
+    var faqEl = target.closest ? target.closest('[data-faq]') : null;
+    if (faqEl) {
+      var item = faqEl.closest('.faq-item');
+      if (item) {
+        var opened = item.classList.toggle('is-open');
+        faqEl.setAttribute('aria-expanded', opened ? 'true' : 'false');
+      }
+      return;
+    }
+
+    /* mini warm-up */
+    var miniAnswer = target.closest ? target.closest('[data-mini-answer]') : null;
+    if (miniAnswer) {
+      handleMiniAnswer(miniAnswer);
+      return;
+    }
+
+    /* action */
+    var actionEl = target.closest ? target.closest('[data-action]') : null;
+    if (!actionEl) {
+      if (!target.closest || !target.closest('.avatar-wrap')) closeUserMenu();
+      if (!target.closest || (!target.closest('#landing-mobile-menu') && !target.closest('[data-action="landing-menu"]'))) {
+        closeLandingMenu();
+      }
+      return;
+    }
+
+    var action = actionEl.getAttribute('data-action');
+    if (actionEl.tagName === 'A') event.preventDefault();
+    if (action !== 'landing-menu') closeLandingMenu();
+
+    if (action === 'toggle-theme') { closeUserMenu(); toggleTheme(); return; }
+    if (action === 'toggle-fullscreen' || action === 'fullscreen') { toggleFullscreen(); return; }
+    if (action === 'open-auth') { openAuth(actionEl.getAttribute('data-mode') || 'login'); return; }
+    if (action === 'auth-tab') { openAuth(actionEl.getAttribute('data-mode') || 'login'); return; }
+    if (action === 'toggle-password') { togglePassword(actionEl); return; }
+    if (action === 'close-modal') { closeModal(); return; }
+    if (action === 'logout') { requestLogout(); return; }
+    if (action === 'settings') { openSettings(); return; }
+    if (action === 'search') { openSearch(); return; }
+    if (action === 'user-menu') {
+      event.stopPropagation();
+      DIXI_STATE.userMenuOpen = !DIXI_STATE.userMenuOpen;
+      var menu = document.querySelector('.user-menu');
+      if (menu) menu.classList.toggle('is-open', DIXI_STATE.userMenuOpen);
+      return;
+    }
+    if (action === 'close-toast') {
+      removeToast(actionEl.closest('.toast'));
+      return;
+    }
+    if (action === 'goal-option') { handleGoalOption(actionEl); return; }
+    if (action === 'text-size') { setTextSize(actionEl.getAttribute('data-size')); return; }
+    if (action === 'change-password') { openChangePassword(); return; }
+    if (action === 'refresh-app') { manualRefresh(); return; }
+    if (action === 'donate') { closeLandingMenu(); openDonation(); return; }
+    if (action === 'donate-retry') {
+      var donateBox = document.getElementById('donate-body');
+      if (donateBox) donateBox.innerHTML = donationLoadingHTML();
+      DIXI_DONATION = null;
+      apiCall('apiDonation', DIXI_STATE.token || null).then(function (data) {
+        DIXI_DONATION = data;
+        var box = document.getElementById('donate-body');
+        if (box) box.innerHTML = donationBodyHTML(data);
+      }).catch(function (err) {
+        var box = document.getElementById('donate-body');
+        if (box) box.innerHTML = '<div class="donate-error"><p>' + esc(err.message || 'Gagal memuat kode QRIS.') + '</p></div>';
+      });
+      return;
+    }
+    if (action === 'check-status') {
+      if (DIXI_STATE.modal) closeModal();
+      closeUserMenu();
+      refreshBoot(false).catch(function (err) { toast('Gagal memeriksa', err.message || 'Coba lagi.', 'error'); });
+      return;
+    }
+    if (action === 'dismiss-announcement') {
+      try { localStorage.setItem(DIXI_ANNOUNCE_KEY, String(getSettingsPublic().announcement || '')); } catch (err) { /* abaikan */ }
+      var banner = actionEl.closest('.announce');
+      if (banner && banner.parentNode) banner.parentNode.removeChild(banner);
+      return;
+    }
+    if (action === 'reset-guest') { resetGuestProgress(); return; }
+    if (action === 'retry-boot') { bootDixi(); return; }
+    if (action === 'enter-app') { navigateTo('#/dashboard'); return; }
+    if (action === 'scroll-top') { window.scrollTo({ top: 0, behavior: 'smooth' }); closeLandingMenu(); return; }
+    if (action === 'landing') { navigateTo('#/'); return; }
+    if (action === 'speak') { speakWord(actionEl.getAttribute('data-word')); return; }
+    if (action === 'locked-module') {
+      openUpsell('locked', actionEl.getAttribute('data-title') || '');
+      return;
+    }
+    if (action === 'upsell') {
+      openUpsell(actionEl.getAttribute('data-reason') || 'locked', actionEl.getAttribute('data-title') || '');
+      return;
+    }
+    if (action === 'start-quiz') {
+      beginQuiz(actionEl.getAttribute('data-track'), actionEl.getAttribute('data-module'));
+      return;
+    }
+    if (action === 'open-settings') { openSettings(); return; }
+    if (action === 'scroll-section') {
+      scrollToId(actionEl.getAttribute('data-target'));
+      return;
+    }
+
+    if (typeof handleViewAction === 'function' && handleViewAction(action, actionEl, event)) return;
+    if (typeof handleAdminAction === 'function' && handleAdminAction(action, actionEl, event)) return;
+    if (typeof handleQuizAction === 'function' && handleQuizAction(action, actionEl, event)) return;
+  });
+
+  document.addEventListener('submit', function (event) {
+    var form = event.target;
+    if (form.id === 'auth-form') {
+      event.preventDefault();
+      handleAuthSubmit(form);
+      return;
+    }
+    if (form.id === 'settings-form') {
+      event.preventDefault();
+      handleSettingsSubmit(form);
+      return;
+    }
+    if (form.id === 'password-form') {
+      event.preventDefault();
+      handlePasswordSubmit(form);
+      return;
+    }
+    if (typeof handleAdminSubmit === 'function' && handleAdminSubmit(form, event)) return;
+  });
+
+  document.addEventListener('input', function (event) {
+    if (event.target.id === 'catalog-search') {
+      DIXI_STATE.catalogFilter.q = event.target.value;
+      if (typeof refreshCatalogGrid === 'function') refreshCatalogGrid();
+      return;
+    }
+    if (event.target.id === 'search-input') {
+      DIXI_STATE.searchQuery = event.target.value;
+      refreshSearchResults();
+      return;
+    }
+    if (typeof handleAdminInput === 'function') handleAdminInput(event);
+  });
+
+  document.addEventListener('keydown', function (event) {
+    var key = event.key;
+
+    if (key === 'Escape') {
+      if (DIXI_STATE.modal) { if (DIXI_STATE.modal.closable) closeModal(); return; }
+      if (DIXI_STATE.userMenuOpen) { closeUserMenu(); return; }
+      closeLandingMenu();
+      return;
+    }
+
+    if ((event.metaKey || event.ctrlKey) && String(key).toLowerCase() === 'k') {
+      event.preventDefault();
+      if (DIXI_STATE.boot) openSearch();
+      return;
+    }
+
+    if (key === 'Tab' && DIXI_STATE.modal) {
+      var card = document.querySelector('.modal-card');
+      if (!card) return;
+      var focusables = card.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (!focusables.length) return;
+      var first = focusables[0];
+      var last = focusables[focusables.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+      return;
+    }
+
+    if (!DIXI_STATE.modal && DIXI_STATE.route.name === 'quiz' && typeof handleQuizKeydown === 'function') {
+      handleQuizKeydown(event);
+    }
+    if (DIXI_STATE.modal && typeof handleFlashcardKeydown === 'function') {
+      handleFlashcardKeydown(event);
+    }
+  });
+
+  window.addEventListener('hashchange', handleRouteChange);
+
+  window.addEventListener('scroll', function () {
+    var nav = document.querySelector('.landing-nav');
+    if (nav) nav.classList.toggle('is-scrolled', window.scrollY > 24);
+  }, { passive: true });
+
+  document.addEventListener('fullscreenchange', updateFullscreenControls);
+
+  // Saat kembali ke tab: segarkan status sesi, validasi akun, dan notifikasi admin.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible') return;
+    if (Date.now() - DIXI_LAST_PING > 45000) sendPing(true);
+  });
+
+}
+
+function handleMiniAnswer(button) {
+  var card = button.closest('.stage-question');
+  if (!card) return;
+  var isCorrect = button.getAttribute('data-mini-answer') === 'goes';
+  var options = card.querySelectorAll('[data-mini-answer]');
+  options.forEach(function (opt) {
+    opt.classList.remove('is-correct', 'is-wrong');
+    opt.disabled = true;
+    if (opt.getAttribute('data-mini-answer') === 'goes') opt.classList.add('is-correct');
+  });
+  if (!isCorrect) button.classList.add('is-wrong');
+  var feedback = card.querySelector('.mini-feedback');
+  if (feedback) {
+    feedback.classList.remove('hidden');
+    feedback.innerHTML = isCorrect
+      ? icon('circle-check', 'icon-sm') + ' Tepat! She + goes untuk orang ketiga tunggal.'
+      : icon('info', 'icon-sm') + ' Belum tepat. Jawaban yang benar: goes. She + goes.';
+  }
+  if (isCorrect) launchConfetti({ count: 26 });
+}
+
+/* =========================================================================
+   INIT
+   ========================================================================= */
+
+function initDixi() {
+  DIXI_STATE.theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  var savedText = 'md';
+  try { savedText = localStorage.getItem(DIXI_TEXT_KEY) || 'md'; } catch (err) { savedText = 'md'; }
+  setTextSize(savedText);
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', DIXI_STATE.theme === 'dark' ? '#080b14' : '#f4f2ec');
+  bindGlobalEvents();
+  updateThemeControls();
+  updateFullscreenControls();
+  bootDixi();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initDixi);
+} else {
+  initDixi();
+}
+</script>

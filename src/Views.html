@@ -1,0 +1,1359 @@
+<script>
+'use strict';
+
+/* =========================================================================
+   DIXIGRAM — Views
+   File: Views.html
+   ========================================================================= */
+
+var DIXI_TRACK_META = {
+  grammar: {
+    id: 'grammar',
+    title: 'Grammar Quest',
+    short: 'Grammar',
+    icon: 'book-open',
+    description: 'Pahami pola kalimat, hindari jebakan, lalu buktikan lewat latihan.'
+  },
+  vocabulary: {
+    id: 'vocabulary',
+    title: 'Word Voyage',
+    short: 'Vocabulary',
+    icon: 'languages',
+    description: 'Kumpulkan kata dan ekspresi baru, lengkap dengan konteks pemakaiannya.'
+  }
+};
+
+/* =========================================================================
+   KOMPONEN BERSAMA
+   ========================================================================= */
+
+function ringHTML(percent, value, label, size) {
+  var pct = clamp(Number(percent) || 0, 0, 100);
+  var radius = 52;
+  var circumference = 2 * Math.PI * radius;
+  var offset = circumference * (1 - pct / 100);
+  return '<div class="ring" style="--ring-size:' + (size || 130) + 'px" role="img" aria-label="' + esc(label + ' ' + pct + '%') + '">' +
+    '<svg viewBox="0 0 120 120" aria-hidden="true">' +
+      '<circle class="ring-track" cx="60" cy="60" r="' + radius + '"></circle>' +
+      '<circle class="ring-fill" cx="60" cy="60" r="' + radius + '" style="stroke-dasharray:' + circumference.toFixed(2) + ';stroke-dashoffset:' + offset.toFixed(2) + '"></circle>' +
+    '</svg>' +
+    '<div class="ring-content"><div class="ring-value">' + esc(value) + '</div><div class="ring-label">' + esc(label) + '</div></div>' +
+  '</div>';
+}
+
+function trackIconHTML(track, iconName, extra) {
+  return '<span class="track-icon track-' + (track === 'grammar' ? 'grammar' : 'vocabulary') + ' ' + (extra || '') + '">' +
+    icon(iconName || (track === 'grammar' ? 'book-open' : 'languages')) + '</span>';
+}
+
+function statCardHTML(options) {
+  var opts = options || {};
+  return '<div class="stat-card ' + (opts.accent ? 'stat-card--accent' : '') + '">' +
+    '<div class="stat-card-head">' + icon(opts.icon || 'chart') + ' ' + esc(opts.label || '') + '</div>' +
+    '<div class="stat-card-value"><strong>' + esc(opts.value) + '</strong>' + (opts.suffix ? '<span>' + esc(opts.suffix) + '</span>' : '') + '</div>' +
+    (opts.foot ? '<div class="stat-card-foot">' + opts.foot + '</div>' : '') +
+  '</div>';
+}
+
+function missionHTML(options) {
+  var opts = options || {};
+  var progress = clamp(Number(opts.progress) || 0, 0, opts.target);
+  var pct = opts.target ? Math.round((progress / opts.target) * 100) : 0;
+  var done = progress >= opts.target;
+  return '<div class="mission ' + (done ? 'is-done' : '') + '">' +
+    '<span class="mission-check">' + icon('check') + '</span>' +
+    '<div class="mission-main"><div class="mission-title">' + esc(opts.title) + '</div>' +
+      '<div class="mission-sub">' + esc(opts.sub || (progress + ' / ' + opts.target)) + '</div></div>' +
+    '<div class="mission-progress"><div class="progress progress--thin"><span class="progress-fill" style="width:' + pct + '%"></span></div></div>' +
+    '<span class="mission-xp">' + (done ? 'Selesai' : progress + '/' + opts.target) + '</span>' +
+  '</div>';
+}
+
+function achievementCardHTML(a) {
+  var pct = a.target ? Math.round((Math.min(a.progress, a.target) / a.target) * 100) : 0;
+  var gateNote = a.gate && !a.gateMet
+    ? '<span>Butuh ' + a.gate.target + ' ' + (a.gate.metric === 'answers' ? 'jawaban' : a.gate.metric) + ' dulu</span>'
+    : '<span>' + a.progress + ' / ' + a.target + '</span>';
+  return '<div class="achievement-card ' + (a.unlocked ? 'is-unlocked' : 'is-locked') + '">' +
+    '<span class="tier-tag tier-tag--' + esc(a.tier) + '">' + esc(a.tier) + '</span>' +
+    '<span class="achievement-icon">' + icon(a.unlocked ? a.icon : 'lock') + '</span>' +
+    '<div class="achievement-main"><strong>' + esc(a.title) + '</strong>' +
+      '<p>' + esc(a.description) + '</p>' +
+      '<div class="achievement-progress"><div class="progress progress--thin"><span class="progress-fill" style="width:' + pct + '%"></span></div>' +
+      gateNote + '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function emptyStateHTML(iconName, title, text, action) {
+  return '<div class="empty-state">' +
+    '<div class="empty-icon">' + icon(iconName || 'sparkles') + '</div>' +
+    '<h3>' + esc(title) + '</h3><p>' + esc(text) + '</p>' +
+    (action || '') +
+  '</div>';
+}
+
+function progressBarHTML(percent, extraClass) {
+  return '<div class="progress ' + (extraClass || '') + '"><span class="progress-fill" style="width:' + clamp(Number(percent) || 0, 0, 100) + '%"></span></div>';
+}
+
+/* =========================================================================
+   LANDING PAGE
+   ========================================================================= */
+
+function renderLandingPage() {
+  var stats = (DIXI_STATE.boot && DIXI_STATE.boot.stats) || { modules: 24, questions: 192, words: 96, grammarModules: 12, vocabModules: 12 };
+  var word = (DIXI_STATE.boot && DIXI_STATE.boot.wordOfDay) || {
+    word: 'resilient', phonetic: '/rɪˈzɪliənt/', meaning: 'tangguh, cepat pulih',
+    example: 'She stayed resilient after the setback.', exampleId: 'Dia tetap tangguh setelah kemunduran itu.'
+  };
+  // Kartu di landing adalah preview demo, bukan data akun pengunjung.
+  var level = 7;
+  var levelPct = 20;
+  var heroName = 'Explorer';
+  var heroXp = 1240;
+  var loggedIn = !isGuest();
+  var freeG = ((getConfig().guest.freeModules || {}).grammar || []).length;
+  var freeV = ((getConfig().guest.freeModules || {}).vocabulary || []).length;
+  var donate = donationOn();
+
+  return '<div class="landing">' +
+    '<header class="landing-nav" id="landing-nav">' +
+      '<div class="landing-nav-inner">' +
+        '<button class="brand" type="button" data-action="scroll-top" aria-label="Kembali ke atas">' +
+          logoMarkHTML() +
+          '<span class="brand-copy"><span class="brand-name">DIXIGRAM</span><span class="brand-tag">Grammar · Vocabulary</span></span>' +
+        '</button>' +
+        '<nav class="landing-links" aria-label="Navigasi halaman">' +
+          '<button class="landing-link" data-scroll="#fitur">Fitur</button>' +
+          '<button class="landing-link" data-scroll="#materi">Materi</button>' +
+          '<button class="landing-link" data-scroll="#cara">Cara main</button>' +
+          '<button class="landing-link" data-scroll="#akses">Akses</button>' +
+        '</nav>' +
+        '<div class="landing-nav-actions">' +
+          '<button class="icon-btn landing-fullscreen" data-action="toggle-fullscreen" data-fullscreen-btn title="Layar penuh" aria-label="Layar penuh">' + icon(isFullscreenActive() ? 'minimize' : 'maximize') + '</button>' +
+          (donate ? '<button class="icon-btn landing-donate" data-action="donate" title="Dukung DIXIGRAM" aria-label="Donasi">' + icon('heart') + '</button>' : '') +
+          themeSwitchHTML() +
+          (loggedIn
+            ? '<button class="btn btn-ghost btn-sm btn--hide-sm" data-route="#/dashboard">' + icon('dashboard') + ' Dashboard</button>' +
+              '<button class="icon-btn landing-logout" data-action="logout" title="Keluar" aria-label="Keluar">' + icon('log-out') + '</button>'
+            : '<button class="btn btn-ghost btn-sm btn--hide-sm" data-action="open-auth" data-mode="login">Masuk</button>' +
+              '<button class="btn btn-primary btn-sm" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Mulai gratis</button>') +
+          '<button class="icon-btn landing-menu-btn" data-action="landing-menu" aria-label="Buka menu">' + icon('menu') + '</button>' +
+        '</div>' +
+      '</div>' +
+    '</header>' +
+    '<div class="landing-mobile-menu" id="landing-mobile-menu">' +
+      '<button data-scroll="#fitur"><span>Fitur</span>' + icon('arrow-right') + '</button>' +
+      '<button data-scroll="#materi"><span>Materi</span>' + icon('arrow-right') + '</button>' +
+      '<button data-scroll="#cara"><span>Cara main</span>' + icon('arrow-right') + '</button>' +
+      '<button data-scroll="#akses"><span>Akses</span>' + icon('arrow-right') + '</button>' +
+      '<button data-action="toggle-fullscreen"><span>Layar penuh</span>' + icon('maximize') + '</button>' +
+      (donate ? '<button data-action="donate"><span>Donasi</span>' + icon('heart') + '</button>' : '') +
+      (loggedIn
+        ? '<button data-route="#/dashboard"><span>Dashboard</span>' + icon('dashboard') + '</button>' +
+          '<button data-action="logout"><span>Keluar</span>' + icon('log-out') + '</button>'
+        : '<button data-action="open-auth" data-mode="login"><span>Masuk</span>' + icon('key') + '</button>' +
+          '<button data-action="open-auth" data-mode="register"><span>Daftar gratis</span>' + icon('sparkles') + '</button>') +
+    '</div>' +
+
+    '<main id="main">' +
+      '<section class="landing-hero">' +
+        '<div class="hero-bg-grid" aria-hidden="true"></div>' +
+        '<div class="hero-aura hero-aura--1" aria-hidden="true"></div>' +
+        '<div class="hero-aura hero-aura--2" aria-hidden="true"></div>' +
+        '<div class="container hero-grid">' +
+          '<div class="hero-copy">' +
+            '<div class="hero-badge"><span class="badge-dot">' + icon('bolt') + '</span> Game belajar bahasa Inggris · <strong>v' + esc(getConfig().version) + '</strong></div>' +
+            '<h1 class="hero-title"><span class="line">Belajar bahasa.</span><span class="line grad">Naik level.</span></h1>' +
+            '<p class="hero-desc">DIXIGRAM mengubah grammar dan vocabulary jadi petualangan singkat yang bikin ketagihan. Baca materi, jawab soal, kumpulkan XP, dan lihat progresmu tumbuh setiap hari.</p>' +
+            '<div class="hero-actions">' +
+              (loggedIn
+                ? '<button class="btn btn-primary btn-lg" data-action="enter-app">' + icon('dashboard') + ' Buka dashboard</button>' +
+                  '<button class="btn btn-ghost btn-lg" data-route="#/grammar">' + icon('book-open') + ' Lihat modul</button>'
+                : '<button class="btn btn-primary btn-lg" data-action="enter-app">' + icon('play') + ' Mulai sebagai tamu</button>' +
+                  '<button class="btn btn-ghost btn-lg" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Buat akun gratis</button>') +
+            '</div>' +
+            '<div class="hero-proof">' +
+              '<span>' + icon('check') + ' Tanpa kartu kredit</span><span class="sep"></span>' +
+              '<span>' + icon('check') + ' ' + stats.modules + ' modul terstruktur</span><span class="sep"></span>' +
+              '<span>' + icon('check') + ' Full access gratis</span>' +
+            '</div>' +
+            '<div class="hero-metrics">' +
+              '<div class="hero-metric"><div class="num">' + formatNumber(stats.questions) + '</div><div class="lbl">Soal latihan</div></div>' +
+              '<div class="hero-metric"><div class="num">' + formatNumber(stats.modules) + '</div><div class="lbl">Modul</div></div>' +
+              '<div class="hero-metric"><div class="num">' + formatNumber(stats.words) + '</div><div class="lbl">Kata inti</div></div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="hero-stage" aria-label="Pratinjau permainan DIXIGRAM">' +
+            '<div class="stage-glow" aria-hidden="true"></div>' +
+            '<div class="stage-orbit" aria-hidden="true"></div>' +
+            '<div class="stage-orbit stage-orbit--2" aria-hidden="true"></div>' +
+            '<div class="stage-main">' +
+              '<div class="stage-head"><span class="stage-dot"></span><span class="stage-dot"></span><span class="stage-dot"></span><span class="stage-head-title">Daily Quest</span><span class="stage-chip">WARM-UP</span></div>' +
+              '<div class="stage-user">' +
+                '<span class="stage-avatar">' + esc(initials(heroName)) + '</span>' +
+                '<div><div class="stage-user-name">' + esc(heroName) + '</div><div class="stage-user-sub">Contoh progress · Level ' + level + '</div></div>' +
+                '<div class="stage-xp"><strong>' + formatNumber(heroXp) + '</strong><span>Total XP</span></div>' +
+              '</div>' +
+              '<div class="stage-progress"><div class="stage-progress-head"><span>LEVEL ' + level + '</span><span>' + levelPct + '%</span></div>' + progressBarHTML(levelPct, 'progress--thin') + '</div>' +
+              '<div class="stage-question">' +
+                '<div class="mini-label">' + icon('sparkles') + ' Grammar · Present Simple</div>' +
+                '<p>She <em>___</em> to the office every day.</p>' +
+                '<div class="mini-options">' +
+                  '<button class="mini-option" data-mini-answer="go">go</button>' +
+                  '<button class="mini-option" data-mini-answer="goes">goes</button>' +
+                '</div>' +
+                '<div class="mini-feedback hidden"></div>' +
+              '</div>' +
+              '<div class="stage-foot">' + icon('info') + ' Coba jawab — ini pemanasan gratis' +
+                '<span class="mini-dots"><i></i><i></i><i></i><i></i></span></div>' +
+            '</div>' +
+            '<div class="float-card float-card--streak"><span class="fc-icon">' + icon('flame') + '</span><div><strong>7 hari</strong><span>streak belajar</span></div></div>' +
+            '<div class="float-card float-card--word"><div class="fc-eyebrow">Word of the day</div><strong>' + esc(word.word) + '</strong><span>' + esc(word.phonetic) + ' · ' + esc(word.meaning) + '</span></div>' +
+            '<div class="float-card float-card--badge"><span class="fc-icon">' + icon('sparkles') + '</span><div><strong>Perfect Run</strong><span>achievement unlocked</span></div></div>' +
+            '<div class="float-card float-card--level"><div class="lvl">+' + formatNumber(120) + '</div><span>XP hari ini</span></div>' +
+          '</div>' +
+        '</div>' +
+      '</section>' +
+
+      '<section class="proof-strip" aria-label="Ringkasan DIXIGRAM">' +
+        '<div class="container proof-inner">' +
+          '<div class="proof-item">' + icon('book-open') + '<div><strong>' + stats.modules + ' modul</strong><span>Grammar + vocabulary</span></div></div>' +
+          '<div class="proof-item">' + icon('target') + '<div><strong>' + stats.questions + ' soal</strong><span>Latihan aktif & acak</span></div></div>' +
+          '<div class="proof-item">' + icon('bolt') + '<div><strong>XP & level</strong><span>Progress terasa nyata</span></div></div>' +
+          '<div class="proof-item">' + icon('shield') + '<div><strong>Gratis</strong><span>Full access dengan akun</span></div></div>' +
+        '</div>' +
+      '</section>' +
+
+      '<section class="section-pad" id="fitur">' +
+        '<div class="container">' +
+          '<div class="section-head section-head--center reveal">' +
+            '<div class="eyebrow"><span class="dot"></span> Kenapa DIXIGRAM</div>' +
+            '<h2>Belajar yang terasa seperti <span class="text-grad">main game.</span></h2>' +
+            '<p>Setiap sesi singkat, terukur, dan memberi rasa kemajuan. Tidak ada halaman membosankan yang harus ditaklukkan sendirian.</p>' +
+          '</div>' +
+          '<div class="feature-grid">' +
+            featureCard('1', 'sparkles', 'Materi yang langsung bisa dipakai', 'Penjelasan ringkas, rumus visual, contoh dua bahasa, dan jebakan umum. Baca 5 menit, langsung uji.') +
+            featureCard('2', 'target', 'Latihan yang menilai dengan jujur', 'Soal pilihan ganda dan isian. Feedback muncul seketika, lengkap dengan alasan jawabannya.') +
+            featureCard('3', 'bolt', 'XP, level, dan streak', 'Setiap jawaban benar mendorong levelmu. Jaga streak harian agar terasa seperti misi yang hidup.') +
+            featureCard('4', 'chart', 'Progress yang tidak abu-abu', 'Akurasi, modul selesai, dan grafik 7 hari. Kamu tahu persis di mana kamu tumbuh.') +
+            featureCard('5', 'award', 'Pencapaian yang menantang', 'Dari Perfect Run sampai Sharpshooter. Kumpulkan lencana lewat konsistensi, bukan keberuntungan.') +
+            featureCard('6', 'users', 'Papan peringkat yang sehat', 'Bandingkan total XP dengan pembelajar lain. Fokusnya tetap pada ritme belajar masing-masing.') +
+          '</div>' +
+        '</div>' +
+      '</section>' +
+
+      '<section class="section-pad" id="materi" style="padding-top:0;">' +
+        '<div class="container">' +
+          '<div class="section-head reveal">' +
+            '<div class="eyebrow"><span class="dot"></span> Kurikulum</div>' +
+            '<h2>Dua jalur. Satu <span class="text-grad">misi.</span></h2>' +
+            '<p>Mulai dari fondasi, lalu naik ke pola yang lebih halus. Semua modul punya materi, contoh, dan 8 soal di bank latihan.</p>' +
+          '</div>' +
+          '<div class="curriculum-grid">' + landingTrackPanel('grammar') + landingTrackPanel('vocabulary') + '</div>' +
+        '</div>' +
+      '</section>' +
+
+      '<section class="section-pad" id="cara" style="padding-top:0;">' +
+        '<div class="container">' +
+          '<div class="section-head section-head--center reveal">' +
+            '<div class="eyebrow"><span class="dot"></span> Cara main</div>' +
+            '<h2>Tiga langkah, lalu <span class="text-grad">mulai.</span></h2>' +
+          '</div>' +
+          '<div class="how-grid">' +
+            '<div class="how-card reveal"><div class="how-step">1</div><h3>Pilih jalur</h3><p>Mulai dari Grammar Quest atau Word Voyage. Setiap modul punya level A1–B2 dan estimasi waktu yang jelas.</p></div>' +
+            '<div class="how-card reveal"><div class="how-step">2</div><h3>Baca & jawab</h3><p>Serap materinya, lalu hadapi 6 soal acak dari bank modul. Dapatkan feedback dan penjelasan langsung.</p></div>' +
+            '<div class="how-card reveal"><div class="how-step">3</div><h3>Kumpulkan progress</h3><p>XP, level, streak, dan pencapaian tersimpan. Kembali besok untuk menjaga momentum.</p></div>' +
+          '</div>' +
+        '</div>' +
+      '</section>' +
+
+      '<section class="section-pad" id="progress" style="padding-top:0;">' +
+        '<div class="container showcase-grid">' +
+          '<div class="showcase-copy reveal">' +
+            '<div class="eyebrow"><span class="dot"></span> Progress visual</div>' +
+            '<h2>Lihat <span class="text-grad">seberapa jauh</span> kamu sudah melangkah.</h2>' +
+            '<p>Bukan cuma nilai. Kamu melihat kebiasaan, akurasi, dan area yang perlu diulang — semuanya dalam satu dashboard.</p>' +
+            '<div class="showcase-list">' +
+              showcaseItem('Grafik XP 7 hari', 'Temukan pola hari paling produktifmu.') +
+              showcaseItem('Akurasi per jalur', 'Tahu apakah grammar atau vocabulary perlu perhatian.') +
+              showcaseItem('Lencana & pencapaian', 'Rayakan konsistensi, bukan hanya skor tinggi.') +
+            '</div>' +
+            '<div class="hero-actions"><button class="btn btn-primary" data-action="enter-app">' + icon('dashboard') + ' Lihat dashboard</button></div>' +
+          '</div>' +
+          '<div class="showcase-visual reveal">' +
+            '<div class="showcase-window-head"><i></i><i></i><i></i><span>DIXIGRAM · OVERVIEW</span></div>' +
+            '<div class="showcase-body">' +
+              '<div class="showcase-stats">' +
+                '<div class="showcase-stat"><span>Total XP</span><strong>1.240</strong></div>' +
+                '<div class="showcase-stat"><span>Streak</span><strong style="color:var(--coral);">7 hari</strong></div>' +
+                '<div class="showcase-stat"><span>Akurasi</span><strong>86%</strong></div>' +
+                '<div class="showcase-stat"><span>Modul</span><strong>8/12</strong></div>' +
+              '</div>' +
+              '<div class="showcase-chart" aria-hidden="true">' +
+                '<i style="height:38%"></i><i style="height:62%"></i><i style="height:46%"></i><i style="height:78%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:70%"></i>' +
+              '</div>' +
+            '</div>' +
+            '<div class="showcase-achievements">' +
+              '<div class="showcase-ach">' + icon('sparkles') + '<span>Perfect Run</span></div>' +
+              '<div class="showcase-ach">' + icon('flame') + '<span>On Fire</span></div>' +
+              '<div class="showcase-ach">' + icon('target') + '<span>Sharpshooter</span></div>' +
+            '</div>' +
+            '<div class="float-badge">' + icon('trending-up') + '<div><strong>+18% minggu ini</strong><span>dibanding minggu lalu</span></div></div>' +
+          '</div>' +
+        '</div>' +
+      '</section>' +
+
+      '<section class="section-pad" id="akses" style="padding-top:0;">' +
+        '<div class="container">' +
+          '<div class="section-head section-head--center reveal">' +
+            '<div class="eyebrow"><span class="dot"></span> Akses</div>' +
+            '<h2>Coba gratis. Buka semuanya dengan <span class="text-grad">akun gratis.</span></h2>' +
+            '<p>Tidak ada paywall. Akun dipakai untuk menyimpan progress dan membuka seluruh modul' +
+              (getSettingsPublic().requireApproval ? ' — setelah divalidasi admin.' : '.') + '</p>' +
+          '</div>' +
+          '<div class="access-grid reveal">' +
+            '<div class="access-card">' +
+              '<div class="access-icon">' + icon('compass') + '</div>' +
+              '<h3>Mode Tamu</h3>' +
+              '<div class="access-price"><strong>Rp0</strong><span>tanpa akun</span></div>' +
+              '<p>Cocok untuk mencoba rasa permainannya dulu.</p>' +
+              '<ul class="access-list">' +
+                '<li>' + icon('check') + ' ' + freeG + ' modul grammar + ' + freeV + ' modul vocabulary</li>' +
+                '<li>' + icon('check') + ' ' + (getConfig().guest.quizLimit || 2) + ' latihan per hari</li>' +
+                '<li>' + icon('check') + ' Materi lengkap modul gratis</li>' +
+                '<li>' + icon('lock', 'icon-lock') + ' Progress hanya di perangkat ini</li>' +
+                '<li>' + icon('lock', 'icon-lock') + ' Tanpa XP permanen & papan peringkat</li>' +
+              '</ul>' +
+              '<button class="btn btn-ghost" data-action="enter-app">Coba sebagai tamu</button>' +
+            '</div>' +
+            '<div class="access-card access-card--featured">' +
+              '<span class="access-ribbon">Full access</span>' +
+              '<div class="access-icon">' + icon('sparkles') + '</div>' +
+              '<h3>Akun Gratis</h3>' +
+              '<div class="access-price"><strong>Rp0</strong><span>selamanya</span></div>' +
+              '<p>Semua yang kamu butuhkan untuk belajar dengan serius.</p>' +
+              '<ul class="access-list">' +
+                '<li>' + icon('check') + ' ' + stats.modules + ' modul · ' + stats.questions + ' soal · ' + stats.words + ' kata inti</li>' +
+                (getSettingsPublic().requireApproval ? '<li>' + icon('shield') + ' Aktif penuh setelah divalidasi admin</li>' : '') +
+                '<li>' + icon('check') + ' Latihan tanpa batas setiap hari</li>' +
+                '<li>' + icon('check') + ' XP, level, streak, dan pencapaian permanen</li>' +
+                '<li>' + icon('check') + ' Progress tersimpan di akun</li>' +
+                '<li>' + icon('check') + ' Papan peringkat & riwayat belajar</li>' +
+              '</ul>' +
+              '<button class="btn btn-primary" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Buat akun gratis</button>' +
+            '</div>' +
+          '</div>' +
+          (donate
+            ? '<div class="donate-strip reveal">' + icon('heart') +
+                '<div><strong>Gratis, didukung donasi sukarela.</strong><span>Bila DIXIGRAM bermanfaat, kamu bisa ikut menjaga aplikasi ini tetap gratis.</span></div>' +
+                '<button class="btn btn-ghost btn-sm" data-action="donate">Donasi via QRIS</button>' +
+              '</div>'
+            : '') +
+          '<p class="access-note">DIXIGRAM dibuat dengan Google Apps Script. Data akun disimpan di Google Sheets milik aplikasi.</p>' +
+        '</div>' +
+      '</section>' +
+
+      '<section class="section-pad" id="faq" style="padding-top:0;">' +
+        '<div class="container">' +
+          '<div class="section-head section-head--center reveal">' +
+            '<div class="eyebrow"><span class="dot"></span> FAQ</div>' +
+            '<h2>Pertanyaan yang sering <span class="text-grad">muncul.</span></h2>' +
+          '</div>' +
+          '<div class="faq-list">' +
+            faqItem('Apakah DIXIGRAM benar-benar gratis?', 'Ya. Mode tamu gratis untuk mencoba, dan akun gratis membuka seluruh ' + stats.modules + ' modul (A1–B2), latihan tanpa batas, XP, streak, serta pencapaian. Tidak ada kartu kredit.') +
+            (getSettingsPublic().requireApproval
+              ? faqItem('Kenapa akun perlu divalidasi admin?', 'Validasi menjaga papan peringkat dan komunitas tetap sehat. Setelah mendaftar kamu langsung bisa masuk, mencoba modul gratis, dan progress-mu tersimpan. Begitu admin menyetujui, semua modul dan latihan tanpa batas terbuka otomatis.')
+              : '') +
+            (donate ? faqItem('Kalau gratis, untuk apa tombol donasi?', 'Donasi sepenuhnya sukarela untuk mendukung pengembangan materi dan perawatan aplikasi. Semua fitur sama bagi yang berdonasi maupun tidak. Tekan tombol hati (Donasi), lalu pindai kode QRIS dengan m-banking atau e-wallet apa pun.') : '') +
+            faqItem('Apakah harus login dengan Google?', 'Tidak. Kamu mendaftar memakai email dan password. Password disimpan dalam bentuk hash, bukan teks asli.') +
+            faqItem('Apa yang terjadi pada progress tamu?', 'Progress tamu disimpan di browser perangkat itu. Jika cache atau data browser dihapus, progress tamu ikut hilang. Buat akun agar tersimpan permanen.') +
+            faqItem('Bagaimana soal dipilih?', 'Setiap latihan mengambil 6 soal acak dari bank 8 soal pada modul tersebut. Jadi mengulang modul tetap memberi variasi.') +
+            faqItem('Apakah bisa dimainkan di HP?', 'Bisa. Tampilan DIXIGRAM responsif, dengan navigasi bawah khusus untuk layar kecil.') +
+            faqItem('Apakah saya bisa mengubah target harian dan ukuran teks?', 'Bisa. Buka Pengaturan dari menu profil atau sidebar. Pilih target 40, 80, 120, atau 160 XP, dan atur ukuran teks Normal, Besar, atau Ekstra agar nyaman dibaca di ponsel.') +
+          '</div>' +
+        '</div>' +
+      '</section>' +
+
+      '<section class="container" style="padding-bottom:30px;">' +
+        '<div class="final-cta reveal">' +
+          '<div class="eyebrow" style="justify-content:center;"><span class="dot"></span> Siap mulai?</div>' +
+          '<h2>Satu sesi hari ini.<br><span class="text-grad">Satu level lebih dekat.</span></h2>' +
+          '<p>Mulai sebagai tamu, atau buat akun gratis untuk membuka seluruh perjalanan.</p>' +
+          '<div class="hero-actions">' +
+            '<button class="btn btn-primary btn-lg" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Buat akun gratis</button>' +
+            '<button class="btn btn-ghost btn-lg" data-action="enter-app">' + icon('play') + ' Coba dulu</button>' +
+          '</div>' +
+          '<div class="micro">Tanpa kartu kredit · Gratis · Bisa dimainkan di HP</div>' +
+        '</div>' +
+      '</section>' +
+    '</main>' +
+
+    '<footer class="landing-footer">' +
+      '<div class="container footer-grid">' +
+        '<div class="footer-brand">' + brandHTML({ link: false }) +
+          '<p>Game belajar grammar & vocabulary untuk membangun kebiasaan bahasa Inggris yang konsisten.</p>' +
+        '</div>' +
+        '<div class="footer-links">' +
+          '<div class="footer-col"><h4>Belajar</h4><button data-route="#/grammar">Grammar Quest</button><button data-route="#/vocabulary">Word Voyage</button><button data-route="#/progress">Progres</button></div>' +
+          '<div class="footer-col"><h4>Akun</h4><button data-action="open-auth" data-mode="login">Masuk</button><button data-action="open-auth" data-mode="register">Daftar gratis</button><button data-action="settings">Pengaturan</button></div>' +
+          '<div class="footer-col"><h4>Info</h4><button data-scroll="#fitur">Fitur</button><button data-scroll="#faq">FAQ</button><button data-scroll="#akses">Akses</button>' + (donate ? '<button data-action="donate">Donasi</button>' : '') + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="container footer-bottom"><span>© ' + new Date().getFullYear() + ' DIXIGRAM · v' + esc(getConfig().version) + '</span><span>Dibuat dengan Google Apps Script · Belajar dengan ritme sendiri.</span></div>' +
+    '</footer>' +
+  '</div>';
+}
+
+function featureCard(n, iconName, title, text) {
+  return '<div class="feature-card feature-card--' + n + ' reveal">' +
+    '<div class="feature-icon">' + icon(iconName) + '</div>' +
+    '<h3>' + esc(title) + '</h3><p>' + esc(text) + '</p>' +
+  '</div>';
+}
+
+function showcaseItem(title, text) {
+  return '<div class="showcase-item"><span class="showcase-check">' + icon('check') + '</span><div><strong>' + esc(title) + '</strong><span>' + esc(text) + '</span></div></div>';
+}
+
+function landingTrackPanel(track) {
+  var meta = DIXI_TRACK_META[track];
+  var list = getCatalog()[track] || [];
+  return '<div class="track-panel track-' + track + ' reveal">' +
+    '<div class="track-panel-head">' +
+      trackIconHTML(track, meta.icon) +
+      '<div><h3>' + esc(meta.title) + '</h3><p>' + esc(meta.description) + '</p></div>' +
+      '<span class="chip">' + list.length + ' modul</span>' +
+    '</div>' +
+    '<div class="module-lines">' +
+      list.map(function (m) {
+        return '<div class="module-line">' +
+          '<span class="ml-num">' + (Number(m.order) < 10 ? '0' : '') + m.order + '</span>' +
+          '<span class="ml-title">' + esc(m.title) + '</span>' +
+          '<span class="ml-level">' + esc(m.level) + '</span>' +
+          (m.locked ? '<span class="ml-lock" title="Khusus member">' + icon('lock') + '</span>' : '<span class="ml-lock" style="color:var(--ok);" title="Gratis">' + icon('check') + '</span>') +
+        '</div>';
+      }).join('') +
+    '</div>' +
+    '<div class="track-panel-foot">' +
+      '<span>' + (list.filter(function (m) { return !m.locked; }).length) + ' modul bisa dicoba sekarang</span>' +
+      '<button class="link-btn" data-route="#/' + track + '">Lihat jalur ' + icon('arrow-right') + '</button>' +
+    '</div>' +
+  '</div>';
+}
+
+function faqItem(question, answer) {
+  return '<div class="faq-item reveal">' +
+    '<button class="faq-q" data-faq aria-expanded="false"><span>' + esc(question) + '</span>' + icon('chevron-down') + '</button>' +
+    '<div class="faq-a"><p>' + esc(answer) + '</p></div>' +
+  '</div>';
+}
+
+function initLanding() {
+  var nav = document.querySelector('.landing-nav');
+  if (nav) nav.classList.toggle('is-scrolled', window.scrollY > 24);
+
+  var stage = document.querySelector('.hero-stage');
+  var main = document.querySelector('.stage-main');
+  if (stage && main && window.matchMedia && window.matchMedia('(pointer:fine)').matches &&
+      !(window.matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+    stage.addEventListener('pointermove', function (event) {
+      var rect = stage.getBoundingClientRect();
+      var x = (event.clientX - rect.left) / rect.width - 0.5;
+      var y = (event.clientY - rect.top) / rect.height - 0.5;
+      main.style.transform = 'rotate(' + (-2.2 + y * 2) + 'deg) rotateY(' + (4 + x * 5) + 'deg) translateY(' + (y * -4) + 'px)';
+    });
+    stage.addEventListener('pointerleave', function () {
+      main.style.transform = '';
+    });
+  }
+}
+
+/* =========================================================================
+   DASHBOARD
+   ========================================================================= */
+
+function renderDashboard() {
+  var profile = getViewProfile();
+  var progress = getViewProgress();
+  var rec = recommendedModule();
+  var guest = isGuest();
+  var quota = guestQuota();
+  var weekly = progress.weekly || [];
+  var achievements = getViewAchievements();
+  var leaderboard = (DIXI_STATE.boot && DIXI_STATE.boot.leaderboard) || { entries: [] };
+  var word = (DIXI_STATE.boot && DIXI_STATE.boot.wordOfDay) || null;
+  var level = profile.level || 1;
+  var today = progress.today || { answers: 0, quizzes: 0, bestScore: 0, xp: 0 };
+
+  var subtitle = isPending()
+    ? 'Mulai dari modul gratis yang sudah terbuka. Semua XP dan progress-mu ikut tersimpan.'
+    : guest
+    ? (quota && quota.remaining > 0
+      ? 'Kamu punya ' + quota.remaining + ' latihan gratis hari ini. Manfaatkan untuk mencoba jalur favoritmu.'
+      : 'Kuota latihan tamu sudah habis. Daftar gratis untuk lanjut tanpa batas.')
+    : (progress.streak > 0
+      ? 'Streak ' + progress.streak + ' hari. Satu latihan lagi hari ini menjaga momentummu tetap hidup.'
+      : 'Mulai satu sesi singkat hari ini. Konsistensi kecil lebih kuat daripada niat besar.');
+
+  return '<div class="dash-hero">' +
+      '<div class="dash-hero-copy">' +
+        '<div class="dash-kicker"><span class="pulse-dot"></span> ' + esc(todayLabel()) + ' · ' + (guest ? 'Mode tamu' : (isPending() ? 'Menunggu validasi' : 'Level ' + level)) + '</div>' +
+        '<h1 class="dash-title">' + esc(greeting()) + ', <span class="name">' + esc(firstName(profile.name)) + '</span>.</h1>' +
+        '<p class="dash-sub">' + esc(subtitle) + '</p>' +
+        '<div class="dash-hero-actions">' +
+          (rec
+            ? '<button class="btn btn-primary" data-route="#/lesson/' + rec.track + '/' + rec.id + '">' + icon('play') + ' Lanjutkan: ' + esc(rec.title) + '</button>'
+            : '<button class="btn btn-primary" data-route="#/grammar">' + icon('book-open') + ' Pilih modul</button>') +
+          '<button class="btn btn-ghost" data-route="#/progress">' + icon('chart') + ' Lihat progres</button>' +
+          (guest ? '<button class="btn btn-ghost" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Full access</button>' : '') +
+          (isAdmin() && adminPendingCount() ? '<button class="btn btn-ghost" data-action="admin-notif">' + icon('bell') + ' ' + adminPendingCount() + ' pendaftar menunggu</button>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="dash-hero-side">' +
+        '<div class="dash-level">' + ringHTML(profile.levelProgress || 0, level, 'Level', 132) + '</div>' +
+        '<div class="vline" aria-hidden="true"></div>' +
+        '<div class="hero-mini-stats">' +
+          '<div class="hero-mini"><span class="hm-icon hm-icon--lime">' + icon('bolt') + '</span><div><strong>' + formatNumber(profile.xp) + '</strong><span>Total XP</span></div></div>' +
+          '<div class="hero-mini"><span class="hm-icon hm-icon--flame">' + icon('flame') + '</span><div><strong>' + formatNumber(profile.streak) + ' hari</strong><span>Streak belajar</span></div></div>' +
+          '<div class="hero-mini"><span class="hm-icon">' + icon('target') + '</span><div><strong>' + formatNumber(today.xp) + ' / ' + formatNumber(progress.goal) + '</strong><span>XP hari ini</span></div></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="stat-grid">' +
+      statCardHTML({ icon: 'bolt', label: 'Total XP', value: formatNumber(profile.xp), foot: 'Level ' + level + ' · ' + Math.max(0, (profile.nextLevelXp || 0) - (profile.xp || 0)) + ' XP lagi', accent: true }) +
+      statCardHTML({ icon: 'target', label: 'Akurasi', value: progress.accuracy + '%', foot: '<b>' + formatNumber(progress.correct) + '</b> jawaban benar dari ' + formatNumber(progress.answers) }) +
+      statCardHTML({ icon: 'book-open', label: 'Modul selesai', value: progress.completed + '/' + progress.totalModules, foot: progress.completionPct + '% perjalanan selesai' }) +
+      statCardHTML({ icon: 'clock', label: 'Latihan', value: formatNumber(progress.quizzes), foot: 'Total sesi yang pernah diselesaikan' }) +
+    '</div>' +
+
+    '<div class="dashboard-grid">' +
+      '<div class="dash-col">' +
+        '<section class="panel">' +
+          '<div class="panel-head"><h2>Jalur belajar</h2><button class="link-btn" data-route="#/grammar">Semua modul ' + icon('arrow-right') + '</button></div>' +
+          '<div class="panel-sub">Grammar dan vocabulary berjalan berdampingan.</div>' +
+          '<div class="panel-body"><div class="track-row">' +
+            trackProgressHTML('grammar', progress.trackStats.grammar) +
+            trackProgressHTML('vocabulary', progress.trackStats.vocabulary) +
+          '</div>' +
+          (rec
+            ? '<div class="track-progress" style="margin-top:10px;background:var(--surface-2);">' +
+                trackIconHTML(rec.track, rec.icon) +
+                '<div class="tp-main"><div class="tp-top"><strong>Berikutnya: ' + esc(rec.title) + '</strong><span>' + esc(rec.level) + '</span></div>' +
+                '<div class="tp-foot"><span>' + esc(rec.subtitle) + '</span><span>' + rec.minutes + ' menit</span></div></div>' +
+                '<button class="icon-btn" data-route="#/lesson/' + rec.track + '/' + rec.id + '" aria-label="Buka modul">' + icon('arrow-right') + '</button>' +
+              '</div>'
+            : '') +
+          '</div>' +
+        '</section>' +
+
+        '<section class="panel">' +
+          '<div class="panel-head"><h2>Misi hari ini</h2><span class="chip">' + esc(todayLabel().split(',')[0]) + '</span></div>' +
+          '<div class="panel-sub">Tiga target kecil untuk menjaga ritme.</div>' +
+          '<div class="panel-body"><div class="mission-list">' +
+            missionHTML({ title: 'Panaskan mesin', sub: 'Jawab 10 soal', progress: today.answers, target: 10 }) +
+            missionHTML({ title: 'Tuntaskan satu misi', sub: 'Selesaikan 1 latihan', progress: today.quizzes, target: 1 }) +
+            missionHTML({ title: 'Tembak tepat', sub: 'Raih skor minimal 80%', progress: today.bestScore >= 80 ? 1 : 0, target: 1 }) +
+          '</div></div>' +
+        '</section>' +
+
+        '<section class="panel">' +
+          '<div class="panel-head"><h2>Aktivitas terakhir</h2><button class="link-btn" data-route="#/progress">Detail ' + icon('arrow-right') + '</button></div>' +
+          '<div class="panel-body">' +
+            (progress.recent && progress.recent.length
+              ? '<div class="recent-list">' + progress.recent.map(recentRowHTML).join('') + '</div>'
+              : emptyStateHTML('sparkles', 'Belum ada aktivitas', 'Selesaikan satu latihan pertamamu untuk mulai mengisi riwayat.', '<button class="btn btn-primary btn-sm" data-route="#/grammar">Mulai sekarang</button>')) +
+          '</div>' +
+        '</section>' +
+      '</div>' +
+
+      '<div class="dash-col dash-col--side">' +
+        wordOfDayHTML(word) +
+        '<section class="panel">' +
+          '<div class="panel-head"><h2>Papan peringkat</h2><button class="link-btn" data-route="#/leaderboard">Lihat ' + icon('arrow-right') + '</button></div>' +
+          '<div class="panel-body"><div class="mini-board">' + miniLeaderboardHTML(leaderboard.entries) + '</div></div>' +
+        '</section>' +
+        '<section class="panel">' +
+          '<div class="panel-head"><h2>Pencapaian</h2><button class="link-btn" data-route="#/achievements">Semua ' + icon('arrow-right') + '</button></div>' +
+          '<div class="panel-sub">' + achievements.filter(function (a) { return a.unlocked; }).length + ' dari ' + achievements.length + ' terbuka.</div>' +
+          '<div class="panel-body"><div class="achievement-grid">' +
+            achievements.slice().sort(function (a, b) {
+              return (b.unlocked ? 1 : 0) - (a.unlocked ? 1 : 0) ||
+                (b.progress / b.target) - (a.progress / a.target);
+            }).slice(0, 3).map(achievementCardHTML).join('') +
+          '</div></div>' +
+        '</section>' +
+        (donationOn()
+          ? '<section class="panel donate-card">' +
+              '<div class="donate-card-icon">' + icon('heart') + '</div>' +
+              '<div class="donate-card-copy"><strong>DIXIGRAM gratis untuk semua</strong>' +
+              '<span>Suka belajar di sini? Dukung lewat donasi seikhlasnya via QRIS.</span></div>' +
+              '<button class="btn btn-ghost btn-sm" data-action="donate">Donasi</button>' +
+            '</section>'
+          : '') +
+      '</div>' +
+    '</div>';
+}
+
+function trackProgressHTML(track, stats) {
+  var meta = DIXI_TRACK_META[track];
+  var total = stats.total || 6;
+  var completed = stats.completed || 0;
+  var pct = total ? Math.round((completed / total) * 100) : 0;
+  return '<div class="track-progress track-' + track + '">' +
+    trackIconHTML(track, meta.icon) +
+    '<div class="tp-main"><div class="tp-top"><strong>' + esc(meta.title) + '</strong><span>' + completed + '/' + total + '</span></div>' +
+      progressBarHTML(pct, 'progress--track') +
+      '<div class="tp-foot"><span>' + (stats.accuracy || 0) + '% akurasi</span><span>' + formatNumber(stats.xp) + ' XP</span></div>' +
+    '</div>' +
+  '</div>';
+}
+
+function recentRowHTML(item) {
+  return '<div class="recent-row">' +
+    trackIconHTML(item.track, item.icon) +
+    '<div class="recent-main"><div class="recent-title">' + esc(item.title) + '</div><div class="recent-sub">' + shortRelative(item.createdAt || item.date) + ' · ' + item.correct + '/' + item.total + ' benar</div></div>' +
+    '<div class="recent-score ' + (item.score < 60 ? 'low' : '') + '">' + item.score + '%</div>' +
+  '</div>';
+}
+
+function wordOfDayHTML(word) {
+  if (!word) return '';
+  return '<section class="word-of-day">' +
+    '<div class="word-eyebrow">' + icon('sparkles') + ' Word of the day</div>' +
+    '<div class="word-main"><h3>' + esc(word.word) + '</h3>' +
+      '<button class="speak-btn" data-action="speak" data-word="' + esc(word.word) + '" aria-label="Dengarkan pelafalan ' + esc(word.word) + '">' + icon('volume') + '</button>' +
+    '</div>' +
+    '<div class="word-phonetic">' + esc(word.phonetic) + ' · ' + esc(word.pos) + '</div>' +
+    '<div class="word-meaning">' + esc(word.meaning) + '</div>' +
+    '<div class="word-example">“' + esc(word.example) + '”<span>' + esc(word.exampleId) + '</span></div>' +
+    '<div class="word-actions"><button class="btn btn-sm btn-ghost" data-action="speak" data-word="' + esc(word.word) + '">' + icon('volume') + ' Dengarkan</button></div>' +
+  '</section>';
+}
+
+function miniLeaderboardHTML(entries) {
+  if (!entries || !entries.length) {
+    return '<div class="muted" style="font-size:11px;padding:10px 0;">Belum ada pembelajar di papan peringkat.</div>';
+  }
+  return entries.slice(0, 4).map(function (entry) {
+    return '<div class="mini-board-row ' + (entry.isMe ? 'mini-board-me' : '') + '">' +
+      '<span class="mini-rank">' + entry.rank + '</span>' +
+      avatarHTML(entry.name) +
+      '<span class="mini-board-name">' + esc(entry.name) + (entry.isMe ? ' · kamu' : '') + '</span>' +
+      '<span class="mini-board-xp">' + formatNumber(entry.xp) + ' XP</span>' +
+    '</div>';
+  }).join('');
+}
+
+/* =========================================================================
+   CATALOG
+   ========================================================================= */
+
+function renderCatalog(track) {
+  var meta = DIXI_TRACK_META[track];
+  var list = getCatalog()[track] || [];
+  var other = track === 'grammar' ? 'vocabulary' : 'grammar';
+  var levels = ['all', 'A1', 'A2', 'B1', 'B2'];
+  var profile = getViewProfile();
+
+  return '<div class="page-head">' +
+      '<div><div class="breadcrumb"><span>Belajar</span>' + icon('chevron-right') + '<span>' + esc(meta.short) + '</span></div>' +
+        '<h1>' + esc(meta.title) + '</h1><p>' + esc(meta.description) + '</p></div>' +
+      '<div class="page-head-actions">' +
+        '<span class="chip chip--brand">' + icon('bolt') + ' ' + formatNumber(profile.xp) + ' XP</span>' +
+        '<button class="btn btn-ghost btn-sm" data-route="#/' + other + '">' + icon(DIXI_TRACK_META[other].icon) + ' ' + esc(DIXI_TRACK_META[other].short) + '</button>' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="track-jump">' +
+      '<button class="track-jump-card track-' + track + '" data-route="#/' + track + '">' +
+        trackIconHTML(track, meta.icon) +
+        '<div><strong>' + esc(meta.title) + '</strong><span>' + list.length + ' modul · ' + list.reduce(function (s, m) { return s + m.questionCount; }, 0) + ' soal</span></div>' +
+        icon('arrow-up-right', 'icon-arrow') +
+      '</button>' +
+      '<button class="track-jump-card track-' + other + '" data-route="#/' + other + '">' +
+        trackIconHTML(other, DIXI_TRACK_META[other].icon) +
+        '<div><strong>' + esc(DIXI_TRACK_META[other].title) + '</strong><span>Jelajahi jalur lainnya</span></div>' +
+        icon('arrow-right', 'icon-arrow') +
+      '</button>' +
+    '</div>' +
+
+    '<div class="catalog-toolbar">' +
+      '<label class="catalog-search" for="catalog-search">' + icon('search') +
+        '<input id="catalog-search" type="search" placeholder="Cari modul ' + esc(meta.short) + '…" value="' + esc(DIXI_STATE.catalogFilter.q) + '" autocomplete="off">' +
+      '</label>' +
+      '<div class="filter-chips">' + levels.map(function (level) {
+        return '<button class="filter-chip ' + (DIXI_STATE.catalogFilter.level === level ? 'is-active' : '') + '" data-action="catalog-level" data-level="' + level + '">' + (level === 'all' ? 'Semua' : level) + '</button>';
+      }).join('') + '</div>' +
+    '</div>' +
+
+    '<div class="module-grid" id="catalog-grid">' + renderCatalogGrid(track) + '</div>';
+}
+
+function renderCatalogGrid(track) {
+  var query = normalizeText(DIXI_STATE.catalogFilter.q);
+  var level = DIXI_STATE.catalogFilter.level;
+  var list = (getCatalog()[track] || []).map(moduleView).filter(function (m) {
+    if (level !== 'all' && m.level !== level) return false;
+    if (!query) return true;
+    return normalizeText(m.title + ' ' + m.subtitle + ' ' + m.description + ' ' + m.level).indexOf(query) !== -1;
+  });
+
+  if (!list.length) {
+    return '<div style="grid-column:1/-1;">' + emptyStateHTML('search', 'Modul tidak ditemukan', 'Coba kata kunci lain atau ubah filter level.', '<button class="btn btn-ghost btn-sm" data-action="catalog-reset">Reset filter</button>') + '</div>';
+  }
+
+  return list.map(moduleCardHTML).join('');
+}
+
+function moduleCardHTML(m) {
+  var pct = Number(m.bestScore) || 0;
+  var locked = !!m.locked;
+  var attrs = locked
+    ? 'data-action="locked-module" data-title="' + esc(m.title) + '"'
+    : 'data-route="#/lesson/' + m.track + '/' + m.id + '"';
+  var classes = 'module-card track-' + m.track +
+    (locked ? ' is-locked' : '') +
+    (m.completed ? ' is-complete' : '');
+  return '<button class="' + classes + '" ' + attrs + '>' +
+    (locked
+      ? '<span class="module-lock-overlay">' + icon('lock') + ' Member</span>'
+      : (m.completed ? '<span class="module-badge-done" title="Selesai">' + icon('check') + '</span>' : '')) +
+    '<div class="module-card-head">' +
+      trackIconHTML(m.track, m.icon) +
+      '<div class="module-card-tags"><span class="level-badge" data-level="' + esc(m.level) + '">' + esc(m.level) + '</span><span class="chip chip--sm">' + icon('clock') + ' ' + m.minutes + 'm</span></div>' +
+    '</div>' +
+    '<h3>' + esc(m.title) + '</h3>' +
+    '<div class="module-sub">' + esc(m.subtitle) + '</div>' +
+    '<div class="module-desc">' + esc(m.description) + '</div>' +
+    '<div class="module-card-foot">' +
+      progressBarHTML(pct, 'progress--track') +
+      '<span class="pct">' + (m.attempts ? pct + '%' : (locked ? '🔒' : 'Baru')) + '</span>' +
+      icon('arrow-right', 'icon-arrow') +
+    '</div>' +
+  '</button>';
+}
+
+function refreshCatalogGrid() {
+  var route = DIXI_STATE.route;
+  var track = route.name === 'vocabulary' ? 'vocabulary' : 'grammar';
+  var grid = document.getElementById('catalog-grid');
+  if (!grid) return;
+  grid.innerHTML = renderCatalogGrid(track);
+  document.querySelectorAll('.filter-chip').forEach(function (chip) {
+    chip.classList.toggle('is-active', chip.getAttribute('data-level') === DIXI_STATE.catalogFilter.level);
+  });
+}
+
+/* =========================================================================
+   LESSON
+   ========================================================================= */
+
+function renderLessonPage() {
+  var data = DIXI_STATE.lesson;
+  if (!data || !data.module) return '';
+  var m = data.module;
+  var meta = DIXI_TRACK_META[m.track];
+  var guest = isGuest();
+  var pending = isPending();
+  var quota = guestQuota();
+  var vocab = m.vocab || [];
+  var canPractice = !isLimited() || (quota && quota.remaining > 0);
+  var practiceAttrs = canPractice
+    ? 'data-action="start-quiz" data-track="' + m.track + '" data-module="' + m.id + '"'
+    : (pending ? 'data-action="upsell" data-reason="limit"' : 'data-action="open-auth" data-mode="register"');
+  var practiceLabel = canPractice ? 'Mulai latihan' : (pending ? 'Kuota habis' : 'Daftar untuk latihan');
+
+  var sections = m.sections.map(function (section, index) {
+    return lessonSectionHTML(section, index);
+  }).join('');
+
+  var cardCount = buildFlashcards(m).length;
+  if (!vocab.length && cardCount) {
+    sections += '<section class="lesson-section lesson-section--cards" id="lesson-section-cards">' +
+      '<div class="lesson-section-head"><span class="section-number">' + icon('layers') + '</span><h2>Latihan kartu</h2></div>' +
+      '<div class="lesson-body"><p>Uji ingatan rumus dan contoh kalimat modul ini: lihat kalimat bahasa Indonesia atau nama rumus, coba jawab dalam hati, lalu balik kartunya.</p></div>' +
+      '<button class="btn btn-ghost" data-action="open-flashcards">' + icon('layers') + ' Buka ' + cardCount + ' kartu</button>' +
+    '</section>';
+  }
+
+  if (vocab.length) {
+    sections += '<section class="lesson-section" id="lesson-section-vocab">' +
+      '<div class="lesson-section-head"><span class="section-number">Aa</span><h2>Kamus mini modul</h2>' +
+        '<button class="btn btn-ghost btn-sm lesson-section-action" data-action="open-flashcards">' + icon('layers') + ' Mode kartu</button></div>' +
+      '<div class="vocab-grid">' + vocab.map(vocabCardHTML).join('') + '</div>' +
+    '</section>';
+  }
+
+  var outline = m.sections.map(function (section, index) {
+    return '<button class="outline-link" data-action="lesson-outline" data-target="#lesson-section-' + index + '"><span class="ol-dot"></span>' + esc(section.title) + '</button>';
+  }).join('') +
+  (vocab.length ? '<button class="outline-link" data-action="lesson-outline" data-target="#lesson-section-vocab"><span class="ol-dot"></span>Kamus mini</button>' : '') +
+  (!vocab.length && cardCount ? '<button class="outline-link" data-action="lesson-outline" data-target="#lesson-section-cards"><span class="ol-dot"></span>Latihan kartu</button>' : '');
+
+  var guestNote = guest
+    ? (quota && quota.remaining > 0
+      ? 'Mode tamu: ' + quota.remaining + ' dari ' + quota.limit + ' latihan tersisa hari ini.'
+      : 'Kuota tamu habis. Daftar gratis untuk latihan tanpa batas.')
+    : pending
+      ? 'Akun menunggu validasi: ' + (quota ? quota.remaining + ' dari ' + quota.limit : '0') + ' latihan tersisa hari ini. Progress tetap tersimpan.'
+      : 'Progress modul ini tersimpan otomatis di akunmu.';
+
+  return '<div class="lesson-page">' +
+    '<div class="lesson-top">' +
+      '<button class="btn btn-ghost btn-sm" data-route="#/' + m.track + '">' + icon('arrow-left') + ' Kembali</button>' +
+      '<div class="breadcrumb"><span>' + esc(meta.short) + '</span>' + icon('chevron-right') + '<span>' + esc(m.title) + '</span></div>' +
+      '<button class="btn btn-primary btn-sm" ' + practiceAttrs + '>' + icon(canPractice ? 'play' : 'sparkles') + ' ' + practiceLabel + '</button>' +
+    '</div>' +
+
+    '<section class="lesson-hero track-' + m.track + '">' +
+      '<div class="lesson-hero-main">' +
+        trackIconHTML(m.track, m.icon) +
+        '<div class="lesson-hero-copy">' +
+          '<div class="lesson-badges">' +
+            '<span class="level-badge" data-level="' + esc(m.level) + '">' + esc(m.level) + '</span>' +
+            '<span class="chip">' + icon(meta.icon) + ' ' + esc(meta.title) + '</span>' +
+            '<span class="chip">' + icon('clock') + ' ' + m.minutes + ' menit</span>' +
+            '<span class="chip">' + icon('target') + ' ' + m.questionCount + ' soal</span>' +
+          '</div>' +
+          '<h1 class="lesson-title">' + esc(m.title) + '</h1>' +
+          '<p class="lesson-sub">' + esc(m.description) + '</p>' +
+          '<ul class="lesson-objectives">' + m.objectives.map(function (obj) {
+            return '<li>' + icon('check') + '<span>' + esc(obj) + '</span></li>';
+          }).join('') + '</ul>' +
+        '</div>' +
+      '</div>' +
+    '</section>' +
+
+    '<div class="lesson-layout">' +
+      '<div class="lesson-main">' + sections +
+        '<div class="lesson-cta track-' + m.track + '">' + icon('sparkles', 'icon-big') +
+          '<h3>Siap menguji pemahaman?</h3>' +
+          '<p>' + m.questionCount + ' soal di bank latihan. Setiap sesi mengambil ' + Math.min(getConfig().quizSize || 6, m.questionCount) + ' soal acak — jawaban dinilai langsung oleh server.</p>' +
+          '<button class="btn btn-primary btn-block" ' + practiceAttrs + '>' + icon(canPractice ? 'play' : 'sparkles') + ' ' + practiceLabel + '</button>' +
+        '</div>' +
+      '</div>' +
+      '<aside class="lesson-side">' +
+        '<div class="outline-card"><h3>' + icon('list') + ' Di modul ini</h3><div class="outline-links">' + outline + '</div></div>' +
+        '<div class="lesson-cta track-' + m.track + '">' + icon('target', 'icon-big') +
+          '<h3>Latihan singkat</h3><p>' + Math.min(getConfig().quizSize || 6, m.questionCount) + ' soal · sekitar 4 menit · feedback langsung.</p>' +
+          '<button class="btn btn-primary btn-block btn-sm" ' + practiceAttrs + '>' + icon(canPractice ? 'play' : 'sparkles') + ' ' + (canPractice ? 'Mulai' : 'Daftar') + '</button>' +
+        '</div>' +
+        '<div class="lesson-note"><strong>Catatan:</strong> ' + esc(guestNote) + '</div>' +
+      '</aside>' +
+    '</div>' +
+  '</div>';
+}
+
+function lessonSectionHTML(section, index) {
+  var parts = '';
+  if (section.body && section.body.length) {
+    parts += '<div class="lesson-body">' + section.body.map(function (p) { return '<p>' + esc(p) + '</p>'; }).join('') + '</div>';
+  }
+  if (section.bullets && section.bullets.length) {
+    parts += '<ul class="bullet-list">' + section.bullets.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul>';
+  }
+  if (section.formula && section.formula.length) {
+    parts += '<div class="formula-card">' + section.formula.map(function (f) {
+      return '<div class="formula-row"><span class="formula-label">' + esc(f.label) + '</span><span class="formula-value">' + esc(f.value) + '</span></div>';
+    }).join('') + '</div>';
+  }
+  if (section.table && section.table.headers) {
+    parts += '<div class="example-table"><table><thead><tr>' +
+      section.table.headers.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' + section.table.rows.map(function (row) {
+        return '<tr>' + row.map(function (cell) { return '<td>' + esc(cell) + '</td>'; }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  if (section.examples && section.examples.length) {
+    parts += '<div class="example-list">' + section.examples.map(function (ex) {
+      return '<div class="example-card"><div class="example-en">' + esc(ex.en) + '</div><div class="example-id">' + esc(ex.id) + '</div></div>';
+    }).join('') + '</div>';
+  }
+  if (section.tip) {
+    parts += '<div class="tip-box"><span class="tip-icon">' + icon('lightbulb') + '</span><p><strong>Tips:</strong> ' + esc(section.tip) + '</p></div>';
+  }
+
+  return '<section class="lesson-section" id="lesson-section-' + index + '">' +
+    '<div class="lesson-section-head"><span class="section-number">' + (index + 1) + '</span><h2>' + esc(section.title) + '</h2>' + icon(section.icon || 'sparkles') + '</div>' +
+    parts +
+  '</section>';
+}
+
+function vocabCardHTML(v) {
+  return '<div class="vocab-card">' +
+    '<div class="vocab-top"><span class="vocab-word">' + esc(v.word) + '</span><span class="vocab-pos">' + esc(v.pos) + '</span>' +
+      '<button class="speak-btn" data-action="speak" data-word="' + esc(v.word) + '" aria-label="Dengarkan ' + esc(v.word) + '">' + icon('volume') + '</button></div>' +
+    '<div class="vocab-phonetic">' + esc(v.phonetic) + '</div>' +
+    '<div class="vocab-meaning">' + esc(v.meaning) + '</div>' +
+    '<div class="vocab-example">“' + esc(v.example) + '”</div>' +
+  '</div>';
+}
+
+function initLesson() {
+  if (DIXI_STATE.lessonObserver) {
+    try { DIXI_STATE.lessonObserver.disconnect(); } catch (err) { /* abaikan */ }
+  }
+  var links = Array.prototype.slice.call(document.querySelectorAll('.outline-link'));
+  var sections = Array.prototype.slice.call(document.querySelectorAll('.lesson-section'));
+  if (!links.length || !sections.length || !('IntersectionObserver' in window)) return;
+
+  DIXI_STATE.lessonObserver = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (!entry.isIntersecting) return;
+      var id = '#' + entry.target.id;
+      links.forEach(function (link) {
+        link.classList.toggle('is-active', link.getAttribute('data-target') === id);
+      });
+    });
+  }, { rootMargin: '-100px 0px -60% 0px', threshold: 0.01 });
+
+  sections.forEach(function (section) { DIXI_STATE.lessonObserver.observe(section); });
+}
+
+/* =========================================================================
+   PROGRESS PAGE
+   ========================================================================= */
+
+function renderProgressPage() {
+  var profile = getViewProfile();
+  var progress = getViewProgress();
+  var guest = isGuest();
+  var achievements = getViewAchievements();
+  var unlocked = achievements.filter(function (a) { return a.unlocked; }).length;
+  var weekly = progress.weekly || [];
+  var weeklyTotal = weekly.reduce(function (sum, d) { return sum + d.xp; }, 0);
+
+  return '<div class="page-head">' +
+      '<div><div class="breadcrumb"><span>Perkembangan</span>' + icon('chevron-right') + '<span>Progres</span></div>' +
+        '<h1>Progres belajar</h1><p>Lihat ritme, kekuatan, dan area yang perlu diulang.</p></div>' +
+      '<div class="page-head-actions"><span class="chip chip--brand">' + icon('bolt') + ' ' + formatNumber(profile.xp) + ' XP</span>' +
+        '<button class="btn btn-primary btn-sm" data-route="#/grammar">' + icon('play') + ' Latihan baru</button></div>' +
+    '</div>' +
+
+    (guest ? '<div class="guest-banner" style="margin-bottom:16px;"><span class="gb-icon">' + icon('info') + '</span><div class="guest-banner-text"><strong>Progress lokal.</strong> Data ini tersimpan di browser ini saja. Daftar gratis agar progress permanen.</div><button class="btn btn-lime btn-sm" data-action="open-auth" data-mode="register">Simpan progress</button></div>' : '') +
+
+    '<div class="progress-hero">' +
+      '<div class="progress-hero-main">' +
+        ringHTML(profile.levelProgress || 0, profile.level, 'Level', 152) +
+        '<div class="progress-hero-copy"><div class="eyebrow"><span class="dot"></span> Perjalanan kamu</div>' +
+          '<h2>Level ' + profile.level + ', ' + esc(firstName(profile.name)) + '.</h2>' +
+          '<p>' + (profile.nextLevelXp - profile.xp) + ' XP lagi menuju Level ' + (profile.level + 1) + '. ' + (progress.completed) + ' dari ' + progress.totalModules + ' modul sudah tuntas.</p>' +
+          '<div class="hero-actions"><button class="btn btn-primary btn-sm" data-route="#/grammar">' + icon('play') + ' Lanjut belajar</button>' +
+            '<button class="btn btn-ghost btn-sm" data-route="#/achievements">' + icon('award') + ' Lihat lencana</button></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="progress-hero-side">' +
+        '<div class="progress-tile"><span>Akurasi</span><strong>' + progress.accuracy + '%</strong><small>' + formatNumber(progress.correct) + '/' + formatNumber(progress.answers) + ' benar</small></div>' +
+        '<div class="progress-tile progress-tile--lime"><span>Streak</span><strong>' + formatNumber(profile.streak) + ' hari</strong><small>' + (profile.streak > 0 ? 'Jaga terus' : 'Mulai hari ini') + '</small></div>' +
+        '<div class="progress-tile"><span>Modul</span><strong>' + progress.completed + '/' + progress.totalModules + '</strong><small>' + progress.completionPct + '% selesai</small></div>' +
+        '<div class="progress-tile"><span>Target harian</span><strong>' + progress.goal + ' XP</strong><small>' + progress.today.xp + ' XP hari ini</small></div>' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="progress-grid">' +
+      '<div class="chart-panel">' +
+        '<div class="chart-head"><div><h2>XP 7 hari terakhir</h2><p>Total ' + formatNumber(weeklyTotal) + ' XP dalam sepekan.</p></div><span class="chip">' + weeklyTotal + ' XP</span></div>' +
+        '<div class="chart-bars">' + weeklyChartHTML(weekly) + '</div>' +
+      '</div>' +
+      '<div class="chart-panel">' +
+        '<div class="chart-head"><div><h2>Per jalur</h2><p>Kekuatan di grammar dan vocabulary.</p></div></div>' +
+        '<div class="track-breakdown">' + trackBreakdownHTML('grammar', progress.trackStats.grammar) + trackBreakdownHTML('vocabulary', progress.trackStats.vocabulary) + '</div>' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="progress-grid" style="grid-template-columns:1fr;">' +
+      '<section class="mastery-panel">' +
+        '<div class="panel-head" style="padding-bottom:14px;"><h2>Penguasaan modul</h2><span class="chip">Best score</span></div>' +
+        '<div class="mastery-grid">' + progress.modules.map(masteryRowHTML).join('') + '</div>' +
+      '</section>' +
+    '</div>' +
+
+    '<div class="progress-grid" style="grid-template-columns:1fr 1fr;">' +
+      '<section class="panel"><div class="panel-head"><h2>Pencapaian terbaru</h2><button class="link-btn" data-route="#/achievements">Semua ' + icon('arrow-right') + '</button></div>' +
+        '<div class="panel-sub">' + unlocked + ' dari ' + achievements.length + ' lencana terbuka.</div>' +
+        '<div class="panel-body"><div class="achievement-grid">' +
+          achievements.slice().sort(function (a, b) { return (b.unlocked ? 1 : 0) - (a.unlocked ? 1 : 0); }).slice(0, 4).map(achievementCardHTML).join('') +
+        '</div></div></section>' +
+      '<section class="panel"><div class="panel-head"><h2>Riwayat terakhir</h2></div><div class="panel-body">' +
+        (progress.recent && progress.recent.length
+          ? '<div class="recent-list">' + progress.recent.map(recentRowHTML).join('') + '</div>'
+          : emptyStateHTML('clock', 'Belum ada riwayat', 'Latihan pertamamu akan muncul di sini.', '<button class="btn btn-primary btn-sm" data-route="#/grammar">Mulai</button>')) +
+      '</div></section>' +
+    '</div>';
+}
+
+function weeklyChartHTML(weekly) {
+  if (!weekly || !weekly.length) return '';
+  var max = Math.max.apply(null, weekly.map(function (d) { return d.xp; }).concat([10]));
+  return weekly.map(function (d) {
+    var h = d.xp > 0 ? Math.max(5, Math.round((d.xp / max) * 100)) : 2;
+    return '<div class="chart-col ' + (d.isToday ? 'is-today' : '') + '">' +
+      '<span class="chart-value">' + (d.xp > 0 ? d.xp : '') + '</span>' +
+      '<div class="chart-bar-wrap"><div class="chart-bar ' + (d.isToday ? 'chart-bar--today' : '') + '" style="height:' + h + '%"></div></div>' +
+      '<span class="chart-label">' + esc(d.label) + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+function trackBreakdownHTML(track, stats) {
+  var meta = DIXI_TRACK_META[track];
+  var pct = stats.completionPct || 0;
+  return '<div class="track-breakdown-item track-' + track + '">' +
+    '<div class="donut" style="background:conic-gradient(var(--track) ' + pct + '%, var(--surface-3) 0)"><span>' + pct + '%</span></div>' +
+    '<div class="track-breakdown-main"><strong>' + esc(meta.title) + '</strong><p>' + stats.completed + ' dari ' + stats.total + ' modul tuntas</p>' +
+      progressBarHTML(pct, 'progress--track') +
+      '<div class="td-foot"><span>Akurasi ' + stats.accuracy + '%</span><span>Avg best ' + stats.avgBest + '%</span></div>' +
+    '</div>' +
+  '</div>';
+}
+
+function masteryRowHTML(m) {
+  var locked = isLimited() && m.locked;
+  var tag = locked
+    ? 'data-action="locked-module" data-title="' + esc(m.title) + '"'
+    : 'data-route="#/lesson/' + m.track + '/' + m.moduleId + '"';
+  return '<button class="mastery-item" ' + tag + ' style="width:100%;text-align:left;background:transparent;">' +
+    '<span class="mastery-icon track-' + m.track + '">' + icon(m.icon) + '</span>' +
+    '<span class="mastery-main"><strong>' + esc(m.title) + '</strong>' + progressBarHTML(m.bestScore || 0, 'progress--track') + '</span>' +
+    '<span class="mastery-score ' + (m.completed ? 'done' : '') + '">' + (locked ? '🔒' : (m.bestScore || 0) + '%') + '</span>' +
+  '</button>';
+}
+
+/* =========================================================================
+   ACHIEVEMENTS PAGE
+   ========================================================================= */
+
+function renderAchievementsPage() {
+  var achievements = getViewAchievements();
+  var unlocked = achievements.filter(function (a) { return a.unlocked; }).length;
+  var profile = getViewProfile();
+  var tierOrder = { bronze: 0, silver: 1, gold: 2 };
+  var sorted = achievements.slice().sort(function (a, b) {
+    return (tierOrder[a.tier] || 0) - (tierOrder[b.tier] || 0);
+  });
+
+  return '<div class="page-head">' +
+      '<div><div class="breadcrumb"><span>Perkembangan</span>' + icon('chevron-right') + '<span>Pencapaian</span></div>' +
+        '<h1>Koleksi lencana</h1><p>Belajar bukan hanya soal skor. Ini bukti-bukti kecil dari konsistensimu.</p></div>' +
+      '<div class="page-head-actions"><span class="chip chip--success">' + icon('award') + ' ' + unlocked + '/' + achievements.length + ' terbuka</span></div>' +
+    '</div>' +
+
+    '<div class="progress-hero-main" style="margin-bottom:16px;">' +
+      ringHTML(achievements.length ? Math.round((unlocked / achievements.length) * 100) : 0, unlocked, 'Lencana', 138) +
+      '<div class="progress-hero-copy"><div class="eyebrow"><span class="dot"></span> Koleksi ' + esc(firstName(profile.name)) + '</div>' +
+        '<h2>' + (unlocked === 0 ? 'Lencana pertamamu menunggu.' : unlocked + ' lencana sudah terkumpul.') + '</h2>' +
+        '<p>Setiap lencana punya target yang jelas. Selesaikan latihan, jaga streak, atau kejar akurasi untuk membukanya.</p>' +
+        '<div class="hero-actions"><button class="btn btn-primary btn-sm" data-route="#/grammar">' + icon('play') + ' Mulai latihan</button></div>' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="achievement-grid">' + sorted.map(achievementCardHTML).join('') + '</div>';
+}
+
+/* =========================================================================
+   LEADERBOARD PAGE
+   ========================================================================= */
+
+function renderLeaderboardPage() {
+  var data = (DIXI_STATE.boot && DIXI_STATE.boot.leaderboard) || { entries: [], you: null };
+  var entries = data.entries || [];
+  var guest = isGuest();
+  var top = entries.slice(0, 3);
+  var rest = top.length >= 3 ? entries.slice(3) : entries.slice(1);
+
+  var podium = '';
+  if (top.length >= 3) {
+    podium = '<div class="podium">' +
+      podiumCard(top[1], 2) + podiumCard(top[0], 1) + podiumCard(top[2], 3) +
+    '</div>';
+  } else if (top.length) {
+    podium = '<div class="podium" style="grid-template-columns:1fr;">' + podiumCard(top[0], 1) + '</div>';
+  }
+
+  return '<div class="leaderboard-page">' +
+    '<div class="page-head">' +
+      '<div><div class="breadcrumb"><span>Perkembangan</span>' + icon('chevron-right') + '<span>Peringkat</span></div>' +
+        '<h1>Papan peringkat</h1><p>Total XP dari seluruh pembelajar DIXIGRAM. Fokus pada ritmemu sendiri.</p></div>' +
+      '<div class="page-head-actions"><span class="chip chip--warm">' + icon('trophy') + ' All-time XP</span></div>' +
+    '</div>' +
+
+    (guest ? '<div class="guest-banner" style="margin-bottom:16px;"><span class="gb-icon">' + icon('trophy') + '</span><div class="guest-banner-text"><strong>Kamu melihat sebagai tamu.</strong> Buat akun untuk ikut masuk papan peringkat dan menyimpan XP.</div><button class="btn btn-lime btn-sm" data-action="open-auth" data-mode="register">Ikut peringkat</button></div>' : '') +
+    (isPending() ? '<div class="guest-banner guest-banner--pending" style="margin-bottom:16px;"><span class="gb-icon">' + icon('clock') + '</span><div class="guest-banner-text"><strong>Belum tampil di peringkat.</strong> XP-mu (' + formatNumber(getViewProfile().xp) + ') sudah tersimpan dan akan muncul setelah akunmu divalidasi admin.</div></div>' : '') +
+
+    (entries.length ? podium : emptyStateHTML('trophy', 'Papan peringkat masih kosong', 'Jadilah pembelajar pertama yang mengumpulkan XP.', '<button class="btn btn-primary btn-sm" data-action="open-auth" data-mode="register">Mulai dari sini</button>')) +
+
+    (rest.length ? '<div class="rank-list">' + rest.map(rankRowHTML).join('') + '</div>' : '') +
+
+    (data.you && data.you.rank > 10
+      ? '<div class="rank-list" style="margin-top:10px;"><div class="rank-row is-me"><span class="rank-no">' + data.you.rank + '</span>' +
+          avatarHTML(data.you.name) + '<span class="rank-name">' + esc(data.you.name) + ' · kamu</span>' +
+          '<span class="rank-streak">' + icon('flame') + data.you.streak + '</span><span class="rank-xp">' + formatNumber(data.you.xp) + ' XP</span></div></div>'
+      : '') +
+
+    '<p class="access-note" style="margin-top:22px;">Peringkat dihitung dari total XP. Nama tampilan diambil dari profil akunmu.</p>' +
+  '</div>';
+}
+
+function podiumCard(entry, place) {
+  if (!entry) return '';
+  return '<div class="podium-card podium-card--' + place + '">' +
+    (place === 1 ? '<span class="podium-crown">' + icon('crown') + '</span>' : '') +
+    '<span class="podium-rank">#' + place + '</span>' +
+    avatarHTML(entry.name) +
+    '<div class="podium-name">' + esc(entry.name) + (entry.isMe ? ' · kamu' : '') + '</div>' +
+    '<div class="podium-xp">' + formatNumber(entry.xp) + ' XP</div>' +
+    '<div class="podium-lvl">Level ' + entry.level + ' · ' + entry.streak + ' hari streak</div>' +
+  '</div>';
+}
+
+function rankRowHTML(entry) {
+  return '<div class="rank-row ' + (entry.isMe ? 'is-me' : '') + '">' +
+    '<span class="rank-no">#' + entry.rank + '</span>' +
+    avatarHTML(entry.name) +
+    '<div style="flex:1;min-width:0;"><div class="rank-name">' + esc(entry.name) + (entry.isMe ? ' · kamu' : '') + '</div>' +
+      '<div class="rank-meta">Level ' + entry.level + '</div></div>' +
+    '<span class="rank-streak">' + icon('flame') + entry.streak + '</span>' +
+    '<span class="rank-xp">' + formatNumber(entry.xp) + ' XP</span>' +
+  '</div>';
+}
+
+/* =========================================================================
+   VIEW ACTIONS
+   ========================================================================= */
+
+function handleViewAction(action, el, event) {
+  if (action === 'landing-menu') {
+    var menu = document.getElementById('landing-mobile-menu');
+    if (menu) menu.classList.toggle('is-open');
+    return true;
+  }
+
+  if (action === 'catalog-level') {
+    DIXI_STATE.catalogFilter.level = el.getAttribute('data-level') || 'all';
+    refreshCatalogGrid();
+    return true;
+  }
+
+  if (action === 'catalog-reset') {
+    DIXI_STATE.catalogFilter = { q: '', level: 'all' };
+    var input = document.getElementById('catalog-search');
+    if (input) input.value = '';
+    refreshCatalogGrid();
+    return true;
+  }
+
+  if (action === 'lesson-outline') {
+    var target = el.getAttribute('data-target');
+    document.querySelectorAll('.outline-link').forEach(function (link) { link.classList.remove('is-active'); });
+    el.classList.add('is-active');
+    scrollToId(target);
+    return true;
+  }
+
+  if (action === 'open-flashcards') {
+    openFlashcards(0);
+    return true;
+  }
+  if (action === 'fc-flip') { flipFlashcard(); return true; }
+  if (action === 'fc-next') { stepFlashcard(1); return true; }
+  if (action === 'fc-prev') { stepFlashcard(-1); return true; }
+  if (action === 'fc-shuffle') { shuffleFlashcards(); return true; }
+  if (action === 'fc-known') { markFlashcard(true); return true; }
+  if (action === 'fc-again') { markFlashcard(false); return true; }
+
+  if (action === 'retry-lesson') {
+    DIXI_STATE.lesson = null;
+    DIXI_STATE.lessonKey = '';
+    DIXI_STATE.lessonError = '';
+    DIXI_STATE.lessonErrorCode = '';
+    DIXI_STATE.lessonRequestKey = '';
+    renderRoute();
+    return true;
+  }
+
+  return false;
+}
+</script>
+
+<script>
+'use strict';
+
+/* =========================================================================
+   FLASHCARD KOSAKATA (fitur baru)
+   ========================================================================= */
+
+var DIXI_FC = null;
+
+/**
+ * Membuat kartu dari modul:
+ *  - vocabulary: kata → arti
+ *  - grammar   : nama rumus → rumus, dan kalimat Indonesia → kalimat Inggris
+ */
+function buildFlashcards(m) {
+  if (!m) return [];
+  if (m.vocab && m.vocab.length) {
+    return m.vocab.map(function (v) {
+      return {
+        key: 'v:' + v.word, tag: v.pos, front: v.word, frontSub: v.phonetic, hint: 'Ketuk untuk melihat arti',
+        back: v.meaning, quote: v.example, backSub: v.exampleId, extra: v.collocation, speak: v.word
+      };
+    });
+  }
+  var cards = [];
+  (m.sections || []).forEach(function (section) {
+    (section.formula || []).forEach(function (f) {
+      cards.push({
+        key: 'f:' + section.title + f.label, tag: 'Rumus', front: f.label, frontSub: section.title,
+        hint: 'Ketuk untuk melihat rumusnya', back: f.value, mono: true, backSub: '', speak: ''
+      });
+    });
+    var table = section.table;
+    if (table && table.headers && table.rows) {
+      var h = table.headers.map(function (x) { return String(x).toLowerCase(); });
+      table.rows.forEach(function (row) {
+        if (h.length === 3 && h[1] === 'aktif' && h[2] === 'pasif') {
+          cards.push({ key: 't:' + row[1], tag: 'Ubah ke pasif', front: row[1], frontSub: row[0], hint: 'Ubah ke kalimat pasif, lalu ketuk kartu', back: row[2], backSub: section.title, speak: row[2] });
+        } else if (h.length === 3 && h[2] === 'contoh') {
+          cards.push({ key: 't:' + row.join('|'), tag: 'Pilih kata', front: row[0] + ' → ?', frontSub: h[0] === 'pronoun' ? 'Dipakai untuk apa?' : 'Pasangan yang tepat?',
+            hint: 'Jawab dalam hati, lalu ketuk kartu', back: row[1], quote: row[2], backSub: section.title, speak: row[2] });
+        } else if (h.length === 2 && h[0].indexOf('langsung') !== -1) {
+          cards.push({ key: 't:' + row[0], tag: 'Ubah kalimat', front: row[0], frontSub: 'Jadikan kalimat tidak langsung', hint: 'Jawab dalam hati, lalu ketuk kartu', back: row[1], backSub: section.title, speak: '' });
+        }
+      });
+    }
+    (section.examples || []).forEach(function (ex) {
+      var arrow = ex.en.indexOf(' → ');
+      if (arrow !== -1) {
+        cards.push({
+          key: 'x:' + ex.en, tag: 'Ubah kalimat', front: ex.en.slice(0, arrow), frontSub: 'Ubah kalimat ini',
+          hint: 'Jawab dalam hati, lalu ketuk kartu', back: ex.en.slice(arrow + 3), backSub: ex.id, speak: ex.en.slice(arrow + 3)
+        });
+        return;
+      }
+      var explanatory = /^(Benar|Salah|Defining|Non-defining)\b/.test(ex.id) || ex.id.indexOf('→') !== -1;
+      if (explanatory) return;
+      cards.push({
+        key: 's:' + ex.en, tag: 'Terjemahkan', front: ex.id, frontSub: 'Bagaimana dalam bahasa Inggris?',
+        hint: 'Jawab dalam hati, lalu ketuk kartu', back: ex.en, backSub: section.title, speak: ex.en
+      });
+    });
+  });
+  return cards;
+}
+
+function openFlashcards(start) {
+  var lesson = DIXI_STATE.lesson && DIXI_STATE.lesson.module;
+  var cards = buildFlashcards(lesson);
+  if (!cards.length) return;
+  DIXI_FC = { cards: cards, index: clamp(Number(start) || 0, 0, cards.length - 1), flipped: false, known: {}, title: lesson.title, track: lesson.track };
+  openModal({
+    cardClass: 'modal-card--fc track-' + lesson.track,
+    raw: '<div class="fc-wrap" id="fc-wrap">' + flashcardInnerHTML() + '</div>',
+    ariaLabel: 'Kartu latihan ' + lesson.title,
+    onClose: function () { DIXI_FC = null; }
+  });
+}
+
+function flashcardInnerHTML() {
+  var fc = DIXI_FC;
+  var card = fc.cards[fc.index];
+  var knownCount = Object.keys(fc.known).filter(function (k) { return fc.known[k]; }).length;
+  var pct = Math.round(((fc.index + 1) / fc.cards.length) * 100);
+  var isSentence = card.tag !== 'Rumus' && card.tag !== '' && !(DIXI_FC.cards[0] && DIXI_FC.cards[0].key.indexOf('v:') === 0);
+  return '<div class="fc-head">' +
+      '<div><div class="fc-kicker">' + icon('layers') + ' Mode kartu · ' + esc(fc.title) + '</div>' +
+      '<div class="fc-count">Kartu ' + (fc.index + 1) + ' dari ' + fc.cards.length + ' · <b>' + knownCount + '</b> sudah hafal</div></div>' +
+      '<button class="modal-close" data-action="close-modal" aria-label="Tutup">' + icon('x') + '</button>' +
+    '</div>' +
+    '<div class="progress progress--thin progress--track" style="margin:0 20px;"><span class="progress-fill" style="width:' + pct + '%"></span></div>' +
+    '<button type="button" class="fc-card ' + (fc.flipped ? 'is-flipped' : '') + '" data-action="fc-flip" aria-label="Balik kartu">' +
+      '<span class="fc-face fc-front">' +
+        '<span class="fc-pos">' + esc(card.tag) + '</span>' +
+        '<span class="fc-word ' + (isSentence || card.front.length > 28 ? 'fc-word--long' : '') + '">' + esc(card.front) + '</span>' +
+        (card.frontSub ? '<span class="fc-phonetic">' + esc(card.frontSub) + '</span>' : '') +
+        '<span class="fc-hint">' + icon('rotate', 'icon-sm') + ' ' + esc(card.hint) + '</span>' +
+      '</span>' +
+      '<span class="fc-face fc-back">' +
+        '<span class="fc-meaning ' + (card.mono ? 'fc-meaning--formula' : '') + (isSentence ? ' fc-meaning--sentence' : '') + '">' + esc(card.back) + '</span>' +
+        (card.quote ? '<span class="fc-example">“' + esc(card.quote) + '”</span>' : '') +
+        (card.backSub ? '<span class="fc-example-id">' + esc(card.backSub) + '</span>' : '') +
+        (card.extra ? '<span class="fc-colloc">' + icon('sparkles', 'icon-sm') + ' ' + esc(card.extra) + '</span>' : '') +
+      '</span>' +
+    '</button>' +
+    '<div class="fc-actions">' +
+      '<button class="icon-btn" data-action="fc-prev" aria-label="Kartu sebelumnya"' + (fc.index === 0 ? ' disabled' : '') + '>' + icon('chevron-left') + '</button>' +
+      (card.speak && (!isSentence || fc.flipped) ? '<button class="btn btn-ghost btn-sm" data-action="speak" data-word="' + esc(card.speak) + '">' + icon('volume') + ' Dengar</button>' : '') +
+      (fc.flipped
+        ? '<button class="btn btn-ghost btn-sm" data-action="fc-again">' + icon('rotate') + ' Ulang</button>' +
+          '<button class="btn btn-primary btn-sm" data-action="fc-known">' + icon('check') + ' Hafal</button>'
+        : '<button class="btn btn-primary btn-sm" data-action="fc-flip">' + icon('eye') + ' Balik kartu</button>') +
+      '<button class="icon-btn" data-action="fc-next" aria-label="Kartu berikutnya"' + (fc.index >= fc.cards.length - 1 ? ' disabled' : '') + '>' + icon('chevron-right') + '</button>' +
+    '</div>' +
+    '<div class="fc-foot"><button class="link-btn" data-action="fc-shuffle">' + icon('rotate') + ' Acak urutan</button>' +
+      '<span class="fc-keys">Spasi: balik · ← →: pindah</span></div>';
+}
+
+function renderFlashcard() {
+  var wrap = document.getElementById('fc-wrap');
+  if (wrap && DIXI_FC) wrap.innerHTML = flashcardInnerHTML();
+}
+
+function flipFlashcard() {
+  if (!DIXI_FC) return;
+  DIXI_FC.flipped = !DIXI_FC.flipped;
+  renderFlashcard();
+}
+
+function stepFlashcard(delta) {
+  if (!DIXI_FC) return;
+  var next = clamp(DIXI_FC.index + delta, 0, DIXI_FC.cards.length - 1);
+  if (next === DIXI_FC.index) return;
+  DIXI_FC.index = next;
+  DIXI_FC.flipped = false;
+  renderFlashcard();
+}
+
+function markFlashcard(known) {
+  if (!DIXI_FC) return;
+  DIXI_FC.known[DIXI_FC.cards[DIXI_FC.index].key] = !!known;
+  if (DIXI_FC.index < DIXI_FC.cards.length - 1) {
+    stepFlashcard(1);
+    return;
+  }
+  var total = DIXI_FC.cards.length;
+  var knownCount = Object.keys(DIXI_FC.known).filter(function (k) { return DIXI_FC.known[k]; }).length;
+  renderFlashcard();
+  toast(knownCount === total ? 'Semua kartu hafal!' : 'Satu putaran selesai',
+    knownCount + ' dari ' + total + ' kartu ditandai hafal.' + (knownCount < total ? ' Acak lalu ulangi yang belum.' : ''),
+    knownCount === total ? 'success' : 'info');
+  if (knownCount === total) launchConfetti({ count: 60 });
+}
+
+function shuffleFlashcards() {
+  if (!DIXI_FC) return;
+  var fc = DIXI_FC;
+  var unknown = fc.cards.filter(function (c) { return !fc.known[c.key]; });
+  var pool = unknown.length ? unknown : fc.cards.slice();
+  for (var i = pool.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+  }
+  fc.cards = pool;
+  fc.index = 0;
+  fc.flipped = false;
+  if (unknown.length) fc.known = {};
+  renderFlashcard();
+}
+
+function handleFlashcardKeydown(event) {
+  if (!DIXI_FC) return;
+  var tag = (event.target && event.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  if (event.key === 'ArrowRight') { event.preventDefault(); stepFlashcard(1); }
+  else if (event.key === 'ArrowLeft') { event.preventDefault(); stepFlashcard(-1); }
+  else if (event.key === ' ' || event.key === 'Spacebar') { event.preventDefault(); flipFlashcard(); }
+}
+</script>

@@ -7,6 +7,7 @@
   <meta name="description" content="DIXIGRAM — game belajar grammar dan vocabulary bahasa Inggris: 24 modul level A1–B2, latihan, XP, streak, dan papan peringkat.">
   <meta name="theme-color" content="#003CB4">
   <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://pumatiri.github.io/dixigram/">
 
   <!-- Ikon & aplikasi (bisa "Tambahkan ke Layar Utama" di ponsel) -->
   <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
@@ -21,7 +22,8 @@
   <meta property="og:type" content="website">
   <meta property="og:title" content="DIXIGRAM — Grammar & Vocabulary Game">
   <meta property="og:description" content="24 modul grammar & vocabulary level A1–B2 dengan latihan, XP, streak, dan peringkat.">
-  <meta property="og:image" content="assets/og-image.png">
+  <meta property="og:url" content="https://pumatiri.github.io/dixigram/">
+  <meta property="og:image" content="https://pumatiri.github.io/dixigram/assets/og-image.png">
   <meta name="twitter:card" content="summary_large_image">
 
   <style>
@@ -77,7 +79,7 @@
       var splash = document.getElementById('splash');
       var hint = document.getElementById('hint');
       var direct = document.getElementById('open-direct');
-      direct.href = APP_URL;
+      direct.href = APP_URL + (/^#\/[\w\/-]*$/.test(location.hash) ? location.hash : '');
 
       var done = false;
       frame.addEventListener('load', function () {
@@ -85,7 +87,9 @@
         splash.classList.add('is-hidden');
         setTimeout(function () { splash.style.display = 'none'; }, 250);
       });
-      frame.src = APP_URL;
+      // Teruskan tautan langsung, mis. .../#/admin dari email notifikasi.
+      var hash = /^#\/[\w\/-]*$/.test(location.hash) ? location.hash : '';
+      frame.src = APP_URL + hash;
 
       // Bila server Google lambat (cold start) atau browser memblokir iframe pihak ketiga.
       setTimeout(function () { if (!done) hint.textContent = 'Server sedang dibangunkan, sebentar lagi…'; }, 6000);
