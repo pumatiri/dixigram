@@ -1,22 +1,65 @@
-# DIXIGRAM v1.3.0 — Panduan Update
+# DIXIGRAM v1.4.0 — Panduan Update
 
-Paket ini sudah mencakup semua revisi sebelumnya (v1.2 dan v1.2.1), jadi cukup pasang paket ini saja.
+Paket ini sudah mencakup semua revisi sebelumnya (v1.2 sampai v1.3), jadi cukup pasang paket ini saja.
 
 ## Cara memasang
 
 1. Buka proyek di editor Apps Script.
-2. **Tambah file baru** (bila belum ada): `+` → Script, lalu tempel isinya.
-   - `Content2` ← isi `Content2.gs` (12 modul tambahan)
-   - `Donation` ← isi `Donation.gs` (data donasi dan gambar QRIS)
+2. **Tambah file baru** (bila belum ada). Pilih `+` → Script untuk file `.gs`, atau `+` → HTML untuk file `.html`, lalu tempel isinya:
+   - `Content2` ← `Content2.gs`
+   - `Donation` ← `Donation.gs`
+   - `Survey` (Script) ← `Survey.gs` **(baru)**
+   - `Pdf` (HTML) ← `Pdf.html` **(baru)**
+   - `SurveyUI` (HTML) ← `SurveyUI.html` **(baru)**
+   - `SurveyAdmin` (HTML) ← `SurveyAdmin.html` **(baru)**
 3. **Ganti isi semua file lain** dengan versi di paket ini:
    `Code.gs`, `Auth.gs`, `Database.gs`, `Admin.gs`, `Progress.gs`, `Quiz.gs`, `Content.gs`,
    `Index.html`, `App.html`, `Views.html`, `QuizUI.html`, `AdminUI.html`, `Styles.html`, `Icons.html`, `appsscript.json`.
-4. Isi lagi email admin Anda di `ADMIN_EMAILS` (`Code.gs`), karena file baru berisi daftar contoh.
-5. Jalankan `setupDixigram` sekali dari editor. Kolom baru ditambahkan otomatis, dan data lama tetap aman.
+4. Isi lagi email admin Anda di `ADMIN_EMAILS` (`Code.gs`).
+5. Jalankan `setupDixigram` sekali dari editor.
 6. **Deploy → Kelola deployment → ✏️ → Versi: Versi baru → Deploy.** URL `/exec` tetap sama.
-7. Di repositori GitHub, unggah isi paket `DIXIGRAM-v1.3.0-github.zip`. Di dalamnya ada file baru `docs/assets/qris.png`.
+7. Di repositori GitHub, unggah isi paket `DIXIGRAM-v1.4.0-github.zip`.
+8. Buka **Admin → Angket → Pengaturan angket**, lalu isi **Institusi / program studi** dan periksa judul penelitian. Nilai ini tampil di halaman pengantar angket dan sampul laporan.
 
-## Baru di v1.3.0
+## Baru di v1.4.0 — Angket penelitian (R&D model ADDIE)
+
+### Untuk responden (mahasiswa)
+- **Tempat angket:** bagian **Angket penelitian** muncul di bagian bawah halaman depan dan di bawah setiap halaman aplikasi. Bagian ini juga ada di menu samping dan sebagai ajakan di halaman hasil latihan.
+- **Syarat membuka angket:** tombol angket **terkunci sampai responden menyelesaikan minimal satu latihan**, termasuk sebagai tamu tanpa mendaftar. Server memberi "tiket" bertanda tangan saat latihan selesai, dan tiket ini diperiksa lagi ketika angket dikirim, jadi syarat ini tidak bisa dilewati.
+- **Halaman pengantar:** menjelaskan maksud angket (tahap Implementation & Evaluation ADDIE), petunjuk pengisian, skala jawaban, dan jaminan kerahasiaan.
+- **Identitas:** responden **hanya mengisi NIM** dan mengetik ulang NIM, tanpa nama. Satu NIM hanya bisa mengisi satu kali, dan NIM yang sudah mengisi langsung ditolak sejak halaman pengantar.
+- **Pengisian:** formulir dibagi 7 bagian dengan indikator kemajuan. Butir yang belum dijawab ditandai, dan draf tersimpan otomatis di perangkat.
+- **Bukti pengisian:** setelah mengirim, responden mendapat kode (mis. R-012) dan bisa mengunduh **bukti pengisian (PDF)**.
+
+### Isi angket (56 butir)
+
+| Bagian | Aspek | Butir |
+|---|---|---|
+| A | Profil penggunaan (perangkat, cara akses, durasi, jumlah latihan, jalur, kemampuan awal) | 6 |
+| B | Kegunaan sistem: System Usability Scale baku (Brooke, 1996) | 10 |
+| C | Tampilan antarmuka (layout, keterbacaan, ikon, tampilan di ponsel) | 5 |
+| D | Navigasi dan kinerja (kemudahan, kecepatan, kestabilan) | 5 |
+| E | Materi dan bahasa (kejelasan, contoh, kosakata, keruntutan, kesesuaian level) | 7 |
+| F | Soal latihan (kesesuaian, kejelasan, pilihan jawaban, pembahasan, variasi) | 5 |
+| G | Tingkat kesulitan, jumlah soal, level bahasa, jumlah modul, jenis soal yang diinginkan | 5 |
+| H | Motivasi dan manfaat (gamifikasi, pemahaman grammar, kosakata, minat) | 6 |
+| I | Penilaian umum, NPS, fitur favorit, testimoni, kendala, saran, izin kutipan | 7 |
+
+Butir C–F dan H memakai skala Likert 1–5 (STS–SS). Bagian G memakai skala 1–5 dengan nilai tengah = "sesuai".
+
+### Untuk peneliti (admin)
+Menu **Admin → Angket** berisi:
+- **Ringkasan hasil:** jumlah responden dibanding target 110, skor SUS (grade), persentase respon pengguna (kategori), penilaian umum, dan NPS.
+- **Analisis rinci:** tabel per aspek, sebaran tingkat kesulitan/jumlah soal/level, dan butir dengan skor terendah sebagai prioritas revisi.
+- **Daftar responden:** dengan tanda kualitas data (*cepat* = diisi < 3 menit, *seragam* = semua jawaban sama) dan tombol hapus.
+- **Unduh laporan PDF:** laporan resmi ±18 halaman berisi sampul, daftar isi, pendahuluan dan kisi-kisi, metode analisis, profil responden, SUS, hasil per aspek (rerata, SD, %, kategori, sebaran), kesulitan dan level, NPS, reliabilitas Cronbach's alpha, kualitas data, testimoni dan masukan, kesimpulan dan rekomendasi revisi, serta lampiran instrumen. Lampiran daftar NIM bersifat opsional (kotak centang).
+- **Unduh data CSV** dan tautan ke Google Sheets. Data mentah ada di sheet **DIXI_Survey**, satu kolom per butir, siap diolah di Excel/SPSS. Sheet ini dibuat otomatis saat angket pertama kali dibuka.
+- **Pengaturan angket:** buka/tutup angket, target responden, judul penelitian, nama peneliti, institusi, dan kontak.
+
+Dokumen **Instrumen-Angket-DIXIGRAM.docx/.pdf** (terpisah dari paket ini) memuat instrumen yang sama dalam bentuk cetak. Dokumen ini bisa dipakai untuk lampiran proposal/laporan atau untuk validasi ahli.
+
+## Riwayat v1.3.0
+
 
 | No | Permintaan | Hasil |
 |---|---|---|

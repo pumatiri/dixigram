@@ -241,7 +241,8 @@ function finishQuiz_(token, attemptId) {
         progress: progress,
         achievements: achievements,
         quota: quotaUsage_(session),
-        isGuest: false
+        isGuest: false,
+        surveyTicket: createSurveyTicket_()
       };
       attempt.finished = true;
       attempt.finishedResult = payloadUser;
@@ -281,7 +282,8 @@ function finishQuiz_(token, attemptId) {
     progress: progress,
     achievements: achievements,
     quota: quota,
-    isGuest: !session.user
+    isGuest: !session.user,
+    surveyTicket: createSurveyTicket_()
   };
 
   attempt.finished = true;

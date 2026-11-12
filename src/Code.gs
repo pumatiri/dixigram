@@ -8,7 +8,7 @@
 
 const DIXI = Object.freeze({
   APP_NAME: 'DIXIGRAM',
-  VERSION: '1.3.0',
+  VERSION: '1.4.0',
   TIMEZONE: 'Asia/Jakarta',
 
   // URL publik aplikasi (mis. GitHub Pages). Dipakai untuk tautan di email
@@ -301,7 +301,8 @@ function buildBootstrap_(session) {
     achievements: achievements,
     achievementCatalog: getAchievementMeta_(),
     leaderboard: buildLeaderboard_(session),
-    wordOfDay: getWordOfDay_()
+    wordOfDay: getWordOfDay_(),
+    survey: surveyPublic_()
   };
 
   if (session.role === 'admin') {

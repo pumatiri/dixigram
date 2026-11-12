@@ -1093,7 +1093,7 @@ function routeFromLocation() {
     }
     return { name: 'admin', params: { tab: decodeURIComponent(parts[1] || '') } };
   }
-  if (['dashboard', 'grammar', 'vocabulary', 'progress', 'achievements', 'leaderboard', 'landing'].indexOf(name) !== -1) {
+  if (['dashboard', 'grammar', 'vocabulary', 'progress', 'achievements', 'leaderboard', 'landing', 'angket'].indexOf(name) !== -1) {
     return { name: name, params: {} };
   }
   return { name: 'dashboard', params: {} };
@@ -1184,7 +1184,8 @@ function pageTitle(name) {
     achievements: 'Pencapaian',
     leaderboard: 'Peringkat',
     lesson: 'Materi',
-    admin: 'Panel Admin'
+    admin: 'Panel Admin',
+    angket: 'Angket Penelitian'
   };
   return titles[name] || 'DIXIGRAM';
 }
@@ -1203,6 +1204,9 @@ function renderAppShell() {
           announcementHTML() +
           (guest ? guestBannerHTML() : (isPending() ? pendingBannerHTML() : '')) +
           '<div class="view" data-page="' + esc(active) + '">' + page + '</div>' +
+          (active !== 'admin' && active !== 'angket' && typeof surveySectionHTML === 'function'
+            ? '<div class="app-survey">' + surveySectionHTML('app') + '</div>'
+            : '') +
         '</div>' +
       '</main>' +
     '</div>' +
@@ -1220,6 +1224,7 @@ function renderCurrentPage() {
   if (route.name === 'progress') return renderProgressPage();
   if (route.name === 'achievements') return renderAchievementsPage();
   if (route.name === 'leaderboard') return renderLeaderboardPage();
+  if (route.name === 'angket' && typeof renderSurveyPage === 'function') return renderSurveyPage();
   if (route.name === 'admin' && typeof renderAdminPage === 'function') return renderAdminPage();
   if (route.name === 'lesson') {
     var key = route.params.track + ':' + route.params.moduleId;
@@ -1316,6 +1321,7 @@ function sidebarHTML(active) {
       '<button class="nav-item" data-action="settings">' + icon('settings') + ' Pengaturan</button>' +
       '<button class="nav-item" data-action="refresh-app">' + icon('rotate') + ' Muat ulang data</button>' +
       (donationOn() ? '<button class="nav-item nav-item--donate" data-action="donate">' + icon('heart') + ' Dukung DIXIGRAM</button>' : '') +
+      '<button class="nav-item' + (active === 'angket' ? ' is-active' : '') + '" data-action="survey-open">' + icon('clipboard') + ' Angket penelitian</button>' +
     '</nav>' +
     '<div class="sidebar-foot">' +
       '<div class="side-streak">' +
@@ -2528,6 +2534,7 @@ function bindGlobalEvents() {
       return;
     }
 
+    if (typeof handleSurveyAction === 'function' && handleSurveyAction(action, actionEl, event)) return;
     if (typeof handleViewAction === 'function' && handleViewAction(action, actionEl, event)) return;
     if (typeof handleAdminAction === 'function' && handleAdminAction(action, actionEl, event)) return;
     if (typeof handleQuizAction === 'function' && handleQuizAction(action, actionEl, event)) return;

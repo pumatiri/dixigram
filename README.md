@@ -12,8 +12,9 @@ Backend: Google Apps Script + Google Sheets · Frontend: HtmlService</p>
 src/                     Kode Apps Script (yang di-push ke script.google.com)
   appsscript.json
   Code.gs  Auth.gs  Database.gs  Admin.gs  Progress.gs  Quiz.gs
-  Content.gs  Content2.gs  Donation.gs
+  Content.gs  Content2.gs  Donation.gs  Survey.gs
   Index.html  App.html  Views.html  QuizUI.html  AdminUI.html  Styles.html  Icons.html
+  Pdf.html  SurveyUI.html  SurveyAdmin.html
 docs/                    Situs GitHub Pages (pembungkus Web App + ikon)
   index.html  manifest.webmanifest  assets/
 .github/workflows/       Deploy otomatis ke Apps Script (opsional)
@@ -75,7 +76,7 @@ Persiapan sekali saja:
 > Jangan pernah meng-commit `.clasprc.json` atau `.clasp.json` (sudah ada di `.gitignore`).
 > Bila workflow gagal dengan pesan login/izin, ulangi `clasp login` dan perbarui secret `CLASPRC_JSON`.
 
-## Fitur utama (v1.3)
+## Fitur utama (v1.4)
 
 - 24 modul: 12 grammar + 12 vocabulary, 3 modul di setiap level A1, A2, B1, B2 · 192 soal · 96 kata
 - Mode kartu: kosakata (kata → arti) dan grammar (rumus, terjemahan, ubah kalimat)
@@ -83,6 +84,8 @@ Persiapan sekali saja:
 - **Single login**: akun non-admin hanya aktif di satu perangkat/browser; login kedua ditolak selama sesi lama aktif
   (aktif = ada aktivitas dalam 10 menit terakhir). Admin bisa mengeluarkan sesi yang "nyangkut".
 - Mode ringan: animasi dekoratif dan efek blur dimatikan agar cepat di ponsel
+- **Angket penelitian (R&D model ADDIE):** terbuka setelah minimal satu latihan selesai, termasuk untuk tamu. Responden cukup mengisi NIM.
+  Instrumen berisi 56 butir (SUS + Likert). Admin bisa mengunduh laporan PDF resmi dan data CSV.
 - Istilah kata kerja: V‑base, V‑past, V‑past participle
 - Tombol muat ulang data (⟳) tanpa memuat ulang halaman
 - Gratis, dengan **donasi sukarela via QRIS** (bisa dimatikan di Admin → Pengaturan → Donasi).

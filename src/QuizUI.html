@@ -389,6 +389,7 @@ function finishQuiz() {
 
   apiCall('apiFinishQuiz', DIXI_STATE.token, q.attemptId)
     .then(function (payload) {
+      if (payload.surveyTicket && typeof svSaveTicket === 'function') svSaveTicket(payload.surveyTicket);
       var newAchievements = applyQuizCompletion(payload);
       q.results = {
         payload: payload,
@@ -624,6 +625,7 @@ function renderQuizResult() {
         : 'Progress tersimpan di akunmu · ' + (r.repeat ? 'XP latihan ulang dibatasi ' + repeatPct + '%.' : 'XP penuh untuk modul ini hari ini.') +
           (isPending() ? ' Tampil di peringkat setelah akun divalidasi.' : '')) + '</div>' +
       guestUpsell +
+      (typeof surveyResultPromptHTML === 'function' ? surveyResultPromptHTML() : '') +
     '</div>' +
 
     '<div class="review-panel">' +

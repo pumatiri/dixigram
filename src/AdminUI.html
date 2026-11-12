@@ -9,6 +9,7 @@
 var ADMIN_TABS = [
   { id: 'overview', label: 'Ringkasan', icon: 'dashboard' },
   { id: 'users', label: 'Pengguna', icon: 'users' },
+  { id: 'survey', label: 'Angket', icon: 'clipboard' },
   { id: 'settings', label: 'Pengaturan', icon: 'settings' },
   { id: 'log', label: 'Log', icon: 'history' }
 ];
@@ -76,12 +77,17 @@ function ensureAdminLoaded(force) {
   var staleUsers = force || !st.users || now - st.usersAt > ADMIN_FRESH_MS;
   if ((tab === 'overview' || tab === 'settings' || tab === 'log') && staleOverview) loadAdminOverview();
   if (tab === 'users' && staleUsers) loadAdminUsers();
+  if (tab === 'survey') {
+    if (!st.overview) loadAdminOverview();
+    if (typeof loadAdminSurvey === 'function') loadAdminSurvey(force);
+  }
 }
 
 function markAdminStale() {
   var st = adminState();
   st.overviewAt = 0;
   st.usersAt = 0;
+  if (st.survey) st.survey.at = 0;
 }
 
 function rerenderAdmin() {
@@ -184,6 +190,8 @@ function renderAdminPage() {
       '<button class="btn btn-primary" data-action="admin-refresh">' + icon('rotate') + ' Coba lagi</button></div>';
   } else if (tab === 'users') {
     body = adminUsersTabHTML();
+  } else if (tab === 'survey' && typeof adminSurveyTabHTML === 'function') {
+    body = adminSurveyTabHTML();
   } else if (tab === 'settings') {
     body = adminSettingsTabHTML();
   } else if (tab === 'log') {

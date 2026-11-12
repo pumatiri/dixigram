@@ -1,0 +1,686 @@
+<script>
+'use strict';
+
+/* =========================================================================
+   DIXIGRAM — Angket Respon Pengguna (sisi responden)
+   File: SurveyUI.html
+   - Bagian angket di bawah aplikasi (aktif setelah minimal 1 latihan selesai)
+   - Formulir bertahap di #/angket, draf tersimpan di perangkat
+   - Bukti pengisian (PDF)
+   ========================================================================= */
+
+var SV_TICKET_KEY = 'dixigram:survey-ticket';
+var SV_DRAFT_KEY = 'dixigram:survey-draft';
+var SV_DONE_KEY = 'dixigram:survey-done';
+var SV_MIN_SECONDS = 180; // pengisian di bawah 3 menit ditandai di laporan
+
+function svStore(key, value) {
+  try {
+    if (value === undefined) return JSON.parse(localStorage.getItem(key) || 'null');
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(value));
+  } catch (err) { /* penyimpanan tidak tersedia */ }
+  return null;
+}
+
+function svTicket() { var t = svStore(SV_TICKET_KEY); return t && t.ticket ? t.ticket : ''; }
+function svSaveTicket(ticket) {
+  if (!ticket) return;
+  svStore(SV_TICKET_KEY, { ticket: ticket, at: Date.now() });
+}
+function svDone() { return svStore(SV_DONE_KEY); }
+function svOpen() { var s = DIXI_STATE.boot && DIXI_STATE.boot.survey; return !s || s.open !== false; }
+
+function svState() {
+  if (!DIXI_STATE.survey) {
+    var draft = svStore(SV_DRAFT_KEY) || {};
+    DIXI_STATE.survey = {
+      form: null, loading: false, error: '',
+      step: Number(draft.step) || 0,
+      answers: draft.answers || {},
+      nim: draft.nim || '', nimConfirm: draft.nimConfirm || '',
+      consent: !!draft.consent,
+      startedAt: draft.startedAt || 0,
+      checking: false, submitting: false, result: null, missing: []
+    };
+  }
+  return DIXI_STATE.survey;
+}
+
+function svSaveDraft() {
+  var st = svState();
+  if (st.result) return;
+  svStore(SV_DRAFT_KEY, { step: st.step, answers: st.answers, nim: st.nim, nimConfirm: st.nimConfirm, consent: st.consent, startedAt: st.startedAt });
+}
+
+/* =========================================================================
+   BAGIAN ANGKET DI BAWAH APLIKASI
+   ========================================================================= */
+
+function surveySectionHTML(variant) {
+  if (!svOpen()) {
+    return '<section class="sv-cta sv-cta--' + (variant || 'app') + ' sv-cta--closed">' +
+      '<div class="sv-cta-icon">' + icon('clipboard') + '</div>' +
+      '<div class="sv-cta-copy"><span class="sv-cta-kicker">Angket penelitian</span><h3>Angket sedang ditutup</h3>' +
+      '<p>Terima kasih atas minat Anda. Angket respon pengguna DIXIGRAM saat ini tidak menerima jawaban.</p></div></section>';
+  }
+  var ticket = svTicket();
+  var done = svDone();
+  var draft = svStore(SV_DRAFT_KEY);
+  var status, actions;
+
+  if (ticket) {
+    status = draft && draft.step
+      ? '<span class="sv-status sv-status--draft">' + icon('clock') + ' Draf tersimpan · lanjutkan dari bagian ' + (Number(draft.step) + 1) + '</span>'
+      : '<span class="sv-status sv-status--ready">' + icon('circle-check') + ' Siap diisi · Anda sudah menyelesaikan latihan</span>';
+    actions = '<button class="btn btn-primary" data-action="survey-open">' + icon('clipboard') + (draft && draft.step ? ' Lanjutkan angket' : ' Isi angket sekarang') + '</button>' +
+      (done ? '<button class="btn btn-ghost btn-sm" data-action="survey-receipt">' + icon('download') + ' Bukti pengisian sebelumnya</button>' : '');
+  } else if (done) {
+    status = '<span class="sv-status sv-status--done">' + icon('circle-check') + ' Terima kasih · angket sudah diisi (kode ' + esc(done.code) + ')</span>';
+    actions = '<button class="btn btn-ghost" data-action="survey-receipt">' + icon('download') + ' Unduh bukti pengisian (PDF)</button>' +
+      '<p class="sv-cta-note">Responden lain di perangkat ini? Selesaikan satu latihan, lalu tombol angket aktif kembali.</p>';
+  } else {
+    status = '<span class="sv-status sv-status--locked">' + icon('lock') + ' Terkunci · selesaikan minimal 1 latihan</span>';
+    actions = '<button class="btn btn-primary" type="button" disabled aria-disabled="true">' + icon('lock') + ' Isi angket</button>' +
+      '<button class="btn btn-ghost" data-action="survey-practice">' + icon('play') + ' Mulai latihan</button>';
+  }
+
+  return '<section class="sv-cta sv-cta--' + (variant || 'app') + '" id="angket-penelitian" aria-labelledby="sv-cta-title">' +
+    '<div class="sv-cta-icon">' + icon('clipboard') + '</div>' +
+    '<div class="sv-cta-copy">' +
+      '<span class="sv-cta-kicker">Angket penelitian · R&amp;D model ADDIE</span>' +
+      '<h3 id="sv-cta-title">Bantu kami menyempurnakan DIXIGRAM</h3>' +
+      '<p>Setelah mencoba latihan, isi angket respon pengguna tentang kemudahan penggunaan, tampilan, materi, soal, dan tingkat kesulitan. ' +
+        'Identitas cukup <strong>NIM</strong> (tanpa nama), sekitar 12–15 menit.</p>' +
+      status +
+    '</div>' +
+    '<div class="sv-cta-actions">' + actions + '</div>' +
+  '</section>';
+}
+
+/** Kartu kecil di halaman hasil latihan. */
+function surveyResultPromptHTML() {
+  if (!svOpen() || !svTicket()) return '';
+  return '<div class="sv-result-prompt">' + icon('clipboard') +
+    '<div><strong>Angket penelitian sudah terbuka</strong><span>Ceritakan pengalaman Anda memakai DIXIGRAM. Cukup isi NIM, sekitar 12–15 menit.</span></div>' +
+    '<button class="btn btn-primary btn-sm" data-action="survey-open">Isi angket</button></div>';
+}
+
+/* =========================================================================
+   HALAMAN ANGKET (#/angket)
+   ========================================================================= */
+
+function svSections() {
+  var st = svState();
+  return st.form ? st.form.instrument.sections : [];
+}
+function svSection(id) { return svSections().filter(function (s) { return s.id === id; })[0]; }
+function svSteps() { var st = svState(); return st.form ? st.form.instrument.steps : []; }
+function svTotalSteps() { return svSteps().length + 1; } // + pengantar
+
+function ensureSurveyLoaded() {
+  var st = svState();
+  if (st.form || st.loading) return;
+  st.loading = true;
+  st.error = '';
+  apiCall('apiSurveyForm')
+    .then(function (data) { st.form = data; st.loading = false; svRerender(); })
+    .catch(function (err) { st.loading = false; st.error = err.message || 'Angket belum bisa dimuat.'; svRerender(); });
+}
+
+function svRerender() {
+  if (DIXI_STATE.route.name !== 'angket') return;
+  var view = document.querySelector('.view[data-page="angket"]');
+  if (view) view.innerHTML = renderSurveyPage();
+}
+
+function renderSurveyPage() {
+  var st = svState();
+  ensureSurveyLoaded();
+
+  if (st.result) return svSuccessHTML(st.result);
+  if (st.error && !st.form) {
+    return '<div class="error-page" style="margin-top:4vh;"><div class="error-icon">' + icon('wifi-off') + '</div>' +
+      '<h1>Angket belum bisa dimuat</h1><p>' + esc(st.error) + '</p>' +
+      '<button class="btn btn-primary" data-action="survey-reload">' + icon('rotate') + ' Coba lagi</button></div>';
+  }
+  if (!st.form) return '<div class="loading-block"><span class="spinner"></span> Memuat angket…</div>';
+  if (!st.form.settings.open || !svOpen()) {
+    return '<div class="error-page" style="margin-top:4vh;"><div class="error-icon">' + icon('lock') + '</div>' +
+      '<h1>Angket sedang ditutup</h1><p>Angket respon pengguna saat ini tidak menerima jawaban.</p>' +
+      '<button class="btn btn-ghost" data-route="#/dashboard">Kembali</button></div>';
+  }
+  if (!svTicket()) {
+    return '<div class="error-page" style="margin-top:4vh;"><div class="error-icon">' + icon('lock') + '</div>' +
+      '<h1>Selesaikan satu latihan dulu</h1><p>Angket ini menilai pengalaman Anda memakai DIXIGRAM, jadi tombolnya aktif setelah Anda menyelesaikan minimal satu latihan (boleh sebagai tamu).</p>' +
+      '<div class="hero-actions" style="justify-content:center;"><button class="btn btn-primary" data-action="survey-practice">' + icon('play') + ' Mulai latihan</button>' +
+      '<button class="btn btn-ghost" data-route="#/dashboard">Dashboard</button></div></div>';
+  }
+
+  var total = svTotalSteps();
+  var step = Math.min(st.step, total - 1);
+  var body = step === 0 ? svIntroHTML() : svStepHTML(step);
+
+  return '<div class="sv-page">' +
+    svHeaderHTML(step, total) +
+    '<form class="sv-form" id="survey-form" novalidate>' + body + svNavHTML(step, total) + '</form>' +
+  '</div>';
+}
+
+function svHeaderHTML(step, total) {
+  var names = ['Pengantar'].concat(svSteps().map(function (ids) {
+    return ids.map(function (id) { return svSection(id).short; }).join(' & ');
+  }));
+  var pct = Math.round((step / (total - 1)) * 100);
+  return '<div class="sv-head">' +
+    '<div class="breadcrumb"><span>Angket penelitian</span>' + icon('chevron-right') + '<span>' + esc(names[step]) + '</span></div>' +
+    '<h1>Angket Respon Pengguna DIXIGRAM</h1>' +
+    '<div class="sv-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '" aria-label="Kemajuan pengisian">' +
+      '<div class="sv-progress-bar"><span style="width:' + pct + '%"></span></div>' +
+      '<div class="sv-progress-meta"><span>Langkah ' + (step + 1) + ' dari ' + total + '</span><span>' + pct + '%</span></div>' +
+    '</div>' +
+    '<ol class="sv-steps" aria-hidden="true">' + names.map(function (n, i) {
+      return '<li class="' + (i < step ? 'is-done' : i === step ? 'is-current' : '') + '"><span>' + (i < step ? icon('check') : (i + 1)) + '</span><em>' + esc(n) + '</em></li>';
+    }).join('') + '</ol>' +
+  '</div>';
+}
+
+function svIntroHTML() {
+  var st = svState();
+  var s = st.form.settings;
+  var scale = st.form.scales.agree;
+  var itemCount = 0;
+  svSections().forEach(function (sec) { itemCount += sec.items.length; });
+
+  return '<div class="sv-intro">' +
+    '<section class="sv-card sv-letter">' +
+      '<div class="sv-letter-head">' + logoMarkHTML() +
+        '<div><span class="sv-cta-kicker">Penelitian pengembangan (R&amp;D) · model ADDIE</span>' +
+        '<h2>' + esc(s.title) + '</h2>' +
+        '<p class="sv-meta">' + (s.researcher ? 'Peneliti: <strong>' + esc(s.researcher) + '</strong>' : '') +
+          (s.institution ? ' · ' + esc(s.institution) : '') + '</p></div></div>' +
+      '<p>Mahasiswa yang kami hormati,</p>' +
+      '<p>Angket ini merupakan bagian dari penelitian pengembangan aplikasi <strong>DIXIGRAM</strong>, media latihan grammar dan vocabulary bahasa Inggris berbasis web. ' +
+        'Penelitian ini memakai model <strong>ADDIE</strong> (<em>Analysis, Design, Development, Implementation, Evaluation</em>). Angket ini dipakai pada tahap <strong>implementasi dan evaluasi</strong>.</p>' +
+      '<p>Kami ingin mengetahui pengalaman Anda setelah menggunakan DIXIGRAM, meliputi:</p>' +
+      '<ul class="sv-list">' +
+        '<li><strong>Pengalaman pengguna:</strong> kemudahan penggunaan, tampilan, tata letak, navigasi, dan kinerja aplikasi.</li>' +
+        '<li><strong>Isi pembelajaran:</strong> materi, bahasa penjelasan, kualitas soal, tingkat kesulitan, jumlah dan jenis soal, serta kesesuaian level bahasa.</li>' +
+        '<li><strong>Manfaat dan testimoni:</strong> motivasi belajar, penilaian umum, kesan, kendala, dan saran perbaikan.</li>' +
+      '</ul>' +
+      '<p>Jawaban Anda menjadi dasar revisi produk dan bahan laporan resmi penelitian. Karena itu, mohon isi dengan jujur sesuai pengalaman Anda sendiri.</p>' +
+    '</section>' +
+
+    '<section class="sv-card">' +
+      '<h3>' + icon('info') + ' Petunjuk pengisian</h3>' +
+      '<ol class="sv-list sv-list--num">' +
+        '<li>Angket terdiri atas <strong>' + svSteps().length + ' bagian</strong> (' + itemCount + ' butir), dan pengisiannya sekitar <strong>12–15 menit</strong>.</li>' +
+        '<li>Tidak ada jawaban benar atau salah. Pilih jawaban yang paling sesuai dengan pengalaman Anda.</li>' +
+        '<li>Untuk pernyataan, gunakan skala berikut:</li>' +
+      '</ol>' +
+      '<div class="sv-legend">' + scale.labels.map(function (l, i) {
+        return '<span><b>' + (i + 1) + '</b> ' + esc(scale.short[i]) + ' = ' + esc(l) + '</span>';
+      }).join('') + '</div>' +
+      '<ol class="sv-list sv-list--num" start="4">' +
+        '<li>Bagian <em>Kegunaan Sistem</em> memuat pernyataan bernada negatif. Bacalah setiap pernyataan dengan teliti.</li>' +
+        '<li>Jawaban tersimpan otomatis di perangkat ini, jadi Anda bisa melanjutkan nanti sebelum menekan <strong>Kirim</strong>.</li>' +
+      '</ol>' +
+    '</section>' +
+
+    '<section class="sv-card sv-privacy">' +
+      '<h3>' + icon('shield') + ' Kerahasiaan</h3>' +
+      '<p>Identitas yang diminta <strong>hanya NIM</strong>, tanpa nama. NIM dipakai untuk memastikan setiap mahasiswa mengisi satu kali dan untuk verifikasi partisipasi. ' +
+        'Jawaban dianalisis secara agregat, testimoni hanya dikutip tanpa identitas bila Anda setuju, dan pengisian angket <strong>tidak memengaruhi nilai</strong> mata kuliah Anda.</p>' +
+      (s.contact ? '<p class="sv-meta">Pertanyaan tentang angket: ' + esc(s.contact) + '</p>' : '') +
+    '</section>' +
+
+    '<section class="sv-card sv-identity">' +
+      '<h3>' + icon('user') + ' Identitas responden</h3>' +
+      '<div class="sv-id-grid">' +
+        '<div class="field"><label for="sv-nim">NIM</label><div class="input-shell">' + icon('user') +
+          '<input class="input" id="sv-nim" data-sv-field="nim" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="24" placeholder="Contoh: 2201234567" value="' + esc(st.nim) + '"></div></div>' +
+        '<div class="field"><label for="sv-nim2">Ketik ulang NIM</label><div class="input-shell">' + icon('check') +
+          '<input class="input" id="sv-nim2" data-sv-field="nimConfirm" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="24" placeholder="Untuk memastikan tidak salah ketik" value="' + esc(st.nimConfirm) + '"></div></div>' +
+      '</div>' +
+      '<p class="field-hint">Nama tidak diminta. Pastikan NIM benar karena satu NIM hanya dapat mengisi satu kali.</p>' +
+      '<label class="check-row sv-consent"><input type="checkbox" data-sv-field="consent"' + (st.consent ? ' checked' : '') + '>' +
+        '<span>Saya telah membaca penjelasan di atas dan <strong>bersedia mengisi angket ini secara sukarela</strong>.</span></label>' +
+      '<div class="form-error" id="sv-error" role="alert"></div>' +
+    '</section>' +
+  '</div>';
+}
+
+function svStepHTML(step) {
+  var ids = svSteps()[step - 1] || [];
+  return ids.map(function (id) { return svSectionHTML(svSection(id)); }).join('');
+}
+
+function svSectionHTML(sec) {
+  var st = svState();
+  var scale = st.form.scales.agree;
+  var likert = sec.items.some(function (i) { return i.type === 'likert'; });
+  return '<section class="sv-card sv-section" id="sv-sec-' + sec.id + '">' +
+    '<div class="sv-section-head"><span class="sv-section-id">' + esc(sec.id) + '</span>' +
+      '<div><h2>' + esc(sec.title) + '</h2><p>' + esc(sec.intro) + '</p></div></div>' +
+    (likert ? '<div class="sv-legend sv-legend--compact">' + scale.labels.map(function (l, i) {
+      return '<span><b>' + (i + 1) + '</b> ' + esc(l) + '</span>';
+    }).join('') + '</div>' : '') +
+    '<div class="sv-items">' + sec.items.map(function (item, idx) { return svItemHTML(item, idx); }).join('') + '</div>' +
+  '</section>';
+}
+
+function svItemHTML(item, idx) {
+  var st = svState();
+  var v = st.answers[item.id];
+  var missing = st.missing.indexOf(item.id) !== -1;
+  var required = item.required !== false;
+  var head = '<div class="sv-q"><span class="sv-q-no">' + esc(item.id) + '</span><span class="sv-q-text">' + esc(item.text) +
+    (required ? '' : ' <em class="sv-optional">opsional</em>') + '</span></div>';
+  var name = 'sv-' + item.id;
+  var body = '';
+
+  if (item.type === 'likert' || item.type === 'rating' || item.type === 'semantic') {
+    var scale = item.type === 'rating' ? st.form.scales[item.scale || 'overall'] : st.form.scales.agree;
+    var labels = item.type === 'semantic' ? item.options : scale.labels;
+    var shorts = item.type === 'likert' ? scale.short : null;
+    body = '<div class="sv-scale sv-scale--' + item.type + '" role="radiogroup" aria-label="' + esc(item.text) + '">' +
+      [1, 2, 3, 4, 5].map(function (n) {
+        var on = Number(v) === n;
+        return '<label class="sv-opt' + (on ? ' is-on' : '') + '" title="' + esc(labels[n - 1]) + '">' +
+          '<input type="radio" name="' + name + '" value="' + n + '" data-sv-item="' + item.id + '"' + (on ? ' checked' : '') + '>' +
+          '<b>' + n + '</b><small>' + esc(shorts ? shorts[n - 1] : labels[n - 1]) + '</small></label>';
+      }).join('') + '</div>';
+  } else if (item.type === 'nps') {
+    body = '<div class="sv-nps" role="radiogroup" aria-label="' + esc(item.text) + '">' +
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(function (n) {
+        var on = v !== null && v !== undefined && v !== '' && Number(v) === n;
+        return '<label class="sv-opt sv-opt--nps' + (on ? ' is-on' : '') + '"><input type="radio" name="' + name + '" value="' + n + '" data-sv-item="' + item.id + '"' + (on ? ' checked' : '') + '><b>' + n + '</b></label>';
+      }).join('') + '</div><div class="sv-nps-ends"><span>Sangat tidak mungkin</span><span>Sangat mungkin</span></div>';
+  } else if (item.type === 'choice') {
+    body = '<div class="sv-choices">' + item.options.map(function (o) {
+      var on = v === o;
+      return '<label class="sv-choice' + (on ? ' is-on' : '') + '"><input type="radio" name="' + name + '" value="' + esc(o) + '" data-sv-item="' + item.id + '"' + (on ? ' checked' : '') + '><span>' + esc(o) + '</span></label>';
+    }).join('') + '</div>';
+  } else if (item.type === 'multi') {
+    var list = Array.isArray(v) ? v : [];
+    body = (item.max && item.max < item.options.length ? '<div class="sv-hint">Dipilih ' + list.length + ' dari maksimal ' + item.max + '</div>' : '') +
+      '<div class="sv-choices sv-choices--multi">' + item.options.map(function (o) {
+        var on = list.indexOf(o) !== -1;
+        return '<label class="sv-choice' + (on ? ' is-on' : '') + '"><input type="checkbox" value="' + esc(o) + '" data-sv-item="' + item.id + '" data-sv-multi="1"' + (on ? ' checked' : '') + '><span>' + esc(o) + '</span></label>';
+      }).join('') + '</div>';
+  } else if (item.type === 'text') {
+    var text = String(v || '');
+    body = '<textarea class="input sv-text" rows="4" maxlength="' + (item.max || 1500) + '" data-sv-item="' + item.id + '" placeholder="' + esc(item.placeholder || '') + '">' + esc(text) + '</textarea>' +
+      '<div class="sv-count"><span>' + (item.min ? 'Minimal ' + item.min + ' karakter' : '') + '</span><span data-sv-count="' + item.id + '">' + text.length + ' / ' + (item.max || 1500) + '</span></div>';
+  }
+
+  return '<div class="sv-item sv-item--' + item.type + (missing ? ' is-missing' : '') + '" id="sv-item-' + item.id + '">' + head + body +
+    (missing ? '<div class="sv-missing">' + icon('alert') + ' ' + (item.type === 'text' && item.min ? 'Tulis minimal ' + item.min + ' karakter.' : 'Butir ini belum dijawab.') + '</div>' : '') +
+  '</div>';
+}
+
+function svNavHTML(step, total) {
+  var st = svState();
+  var last = step === total - 1;
+  return '<div class="sv-nav">' +
+    (step > 0 ? '<button class="btn btn-ghost" type="button" data-action="survey-prev">' + icon('arrow-left') + ' Kembali</button>' : '<button class="btn btn-ghost" type="button" data-route="#/dashboard">Nanti saja</button>') +
+    '<span class="sv-nav-note">' + (step === 0 ? 'Jawaban tersimpan otomatis di perangkat ini' : 'Bagian ' + step + ' dari ' + (total - 1)) + '</span>' +
+    (last
+      ? '<button class="btn btn-primary" type="button" data-action="survey-submit"' + (st.submitting ? ' disabled' : '') + '>' +
+          (st.submitting ? '<span class="spinner"></span> Mengirim…' : icon('send') + ' Kirim angket') + '</button>'
+      : '<button class="btn btn-primary" type="button" data-action="survey-next"' + (st.checking ? ' disabled' : '') + '>' +
+          (st.checking ? '<span class="spinner"></span> Memeriksa…' : (step === 0 ? 'Mulai mengisi ' : 'Lanjut ') + icon('arrow-right')) + '</button>') +
+  '</div>';
+}
+
+/* =========================================================================
+   INTERAKSI
+   ========================================================================= */
+
+function svItemsForStep(step) {
+  var items = [];
+  (svSteps()[step - 1] || []).forEach(function (id) { items = items.concat(svSection(id).items); });
+  return items;
+}
+
+function svMissing(items) {
+  var st = svState();
+  return items.filter(function (item) {
+    if (item.required === false) return false;
+    var v = st.answers[item.id];
+    if (item.type === 'multi') return !Array.isArray(v) || !v.length;
+    if (item.type === 'text') return String(v || '').trim().length < (item.min || 1);
+    return v === undefined || v === null || v === '';
+  }).map(function (i) { return i.id; });
+}
+
+function svNormalizeNim(v) { return String(v || '').toUpperCase().replace(/\s+/g, ''); }
+
+function svShowError(msg) {
+  var box = document.getElementById('sv-error');
+  if (box) { box.innerHTML = icon('circle-x') + '<span>' + esc(msg) + '</span>'; box.classList.add('is-visible'); box.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+  else toast('Periksa kembali', msg, 'error');
+}
+
+function svGoto(step) {
+  var st = svState();
+  st.step = step;
+  st.missing = [];
+  svSaveDraft();
+  svRerender();
+  var head = document.querySelector('.sv-head');
+  window.scrollTo({ top: head ? Math.max(0, head.getBoundingClientRect().top + window.scrollY - 70) : 0, behavior: 'auto' });
+}
+
+function svNext() {
+  var st = svState();
+  if (st.step === 0) {
+    var nim = svNormalizeNim(st.nim);
+    if (!/^[A-Z0-9][A-Z0-9.\-\/]{3,23}$/.test(nim) || !/\d/.test(nim)) return svShowError('Tulis NIM sesuai kartu mahasiswa (5–24 karakter, berisi angka).');
+    if (svNormalizeNim(st.nimConfirm) !== nim) return svShowError('Ketik ulang NIM belum sama dengan NIM di atas.');
+    if (!st.consent) return svShowError('Centang pernyataan kesediaan untuk melanjutkan.');
+    st.checking = true;
+    svRerender();
+    apiCall('apiSurveyCheck', { ticket: svTicket(), nim: nim })
+      .then(function () {
+        st.checking = false;
+        st.nim = nim; st.nimConfirm = nim;
+        if (!st.startedAt) st.startedAt = Date.now();
+        // isi otomatis cara akses (bisa diubah responden)
+        if (!st.answers.A2) st.answers.A2 = isGuest() ? 'Sebagai tamu (tanpa akun)' : 'Dengan akun terdaftar';
+        svGoto(1);
+      })
+      .catch(function (err) {
+        st.checking = false;
+        if (err.code === 'SURVEY_TICKET_USED' || err.code === 'SURVEY_LOCKED') svStore(SV_TICKET_KEY, null);
+        svRerender();
+        svShowError(err.message || 'NIM belum bisa diperiksa. Coba lagi.');
+      });
+    return;
+  }
+  var missing = svMissing(svItemsForStep(st.step));
+  if (missing.length) {
+    st.missing = missing;
+    svRerender();
+    var first = document.getElementById('sv-item-' + missing[0]);
+    if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    toast('Masih ada yang kosong', missing.length + ' butir di bagian ini belum dijawab.', 'warning');
+    return;
+  }
+  svGoto(st.step + 1);
+}
+
+function svSubmit() {
+  var st = svState();
+  var all = [];
+  for (var s = 1; s < svTotalSteps(); s++) all = all.concat(svItemsForStep(s));
+  var missing = svMissing(all);
+  if (missing.length) {
+    // pindah ke bagian pertama yang masih kosong
+    for (var step = 1; step < svTotalSteps(); step++) {
+      var ids = svItemsForStep(step).map(function (i) { return i.id; });
+      if (ids.indexOf(missing[0]) !== -1) {
+        svGoto(step);
+        st.missing = missing.filter(function (m) { return ids.indexOf(m) !== -1; });
+        svRerender();
+        break;
+      }
+    }
+    toast('Angket belum lengkap', 'Ada ' + missing.length + ' butir yang belum dijawab.', 'warning');
+    return;
+  }
+  confirmDialog({
+    title: 'Kirim angket?',
+    icon: 'send',
+    message: '<p>Jawaban untuk NIM <strong>' + esc(st.nim) + '</strong> akan dikirim. Setelah dikirim, jawaban tidak bisa diubah.</p>',
+    confirmLabel: 'Kirim sekarang',
+    onConfirm: function () {
+      st.submitting = true;
+      svRerender();
+      apiCall('apiSurveySubmit', {
+        token: DIXI_STATE.token || null,
+        ticket: svTicket(),
+        nim: st.nim,
+        nimConfirm: st.nimConfirm,
+        consent: st.consent === true,
+        durationSec: st.startedAt ? Math.round((Date.now() - st.startedAt) / 1000) : 0,
+        answers: st.answers
+      }).then(function (res) {
+        st.submitting = false;
+        st.result = Object.assign({}, res, { answers: st.answers, title: st.form.settings.title, researcher: st.form.settings.researcher });
+        svStore(SV_DONE_KEY, { code: res.code, nim: res.nim, submittedAt: res.submittedAt, answers: st.answers, title: st.form.settings.title, researcher: st.form.settings.researcher, institution: st.form.settings.institution });
+        svStore(SV_TICKET_KEY, null);
+        svStore(SV_DRAFT_KEY, null);
+        svRerender();
+        window.scrollTo({ top: 0, behavior: 'auto' });
+        if (typeof launchConfetti === 'function') launchConfetti({ count: 60 });
+      }).catch(function (err) {
+        st.submitting = false;
+        if (err.code === 'SURVEY_TICKET_USED' || err.code === 'SURVEY_LOCKED') svStore(SV_TICKET_KEY, null);
+        svRerender();
+        toast('Angket belum terkirim', err.message || 'Coba lagi sebentar lagi.', 'error', 7000);
+      });
+    }
+  });
+}
+
+function svSuccessHTML(res) {
+  return '<div class="sv-page"><div class="sv-card sv-success">' +
+    '<div class="sv-success-icon">' + icon('circle-check') + '</div>' +
+    '<h1>Terima kasih!</h1>' +
+    '<p>Angket Anda sudah kami terima. Masukan Anda sangat berarti bagi pengembangan DIXIGRAM.</p>' +
+    '<div class="sv-receipt">' +
+      '<div><span>Kode responden</span><strong>' + esc(res.code) + '</strong></div>' +
+      '<div><span>NIM</span><strong>' + esc(res.nim) + '</strong></div>' +
+      '<div><span>Waktu</span><strong>' + esc(svFormatDate(res.submittedAt)) + '</strong></div>' +
+    '</div>' +
+    '<div class="hero-actions" style="justify-content:center;">' +
+      '<button class="btn btn-primary" data-action="survey-receipt">' + icon('download') + ' Unduh bukti pengisian (PDF)</button>' +
+      '<button class="btn btn-ghost" data-action="survey-finish">' + icon('dashboard') + ' Kembali ke dashboard</button>' +
+    '</div>' +
+  '</div></div>';
+}
+
+function svFormatDate(iso) {
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso || '');
+  var months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+  return d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear() + ', ' + ('0' + d.getHours()).slice(-2) + '.' + ('0' + d.getMinutes()).slice(-2);
+}
+
+function handleSurveyAction(action, el) {
+  if (action === 'survey-open') {
+    closeUserMenu();
+    navigateTo('#/angket');
+    return true;
+  }
+  if (action === 'survey-practice') {
+    var free = (getConfig().guest.freeModules || {}).grammar || [];
+    navigateTo(free.length ? '#/lesson/grammar/' + free[0] : '#/grammar');
+    return true;
+  }
+  if (action === 'pdf-open-last') { DixiPdf.openLast(); return true; }
+  if (action === 'survey-next') { svNext(); return true; }
+  if (action === 'survey-prev') { svGoto(Math.max(0, svState().step - 1)); return true; }
+  if (action === 'survey-submit') { svSubmit(); return true; }
+  if (action === 'survey-reload') { var st = svState(); st.error = ''; st.form = null; svRerender(); return true; }
+  if (action === 'survey-finish') {
+    DIXI_STATE.survey = null;
+    navigateTo('#/dashboard');
+    return true;
+  }
+  if (action.indexOf('sva-') === 0 && typeof handleSurveyAdminAction === 'function') return handleSurveyAdminAction(action, el);
+  if (action === 'survey-receipt') {
+    var done = svDone();
+    if (!done) { toast('Bukti tidak ditemukan', 'Data pengisian tidak tersimpan di perangkat ini.', 'error'); return true; }
+    loadSurveyForm(function (form) {
+      try {
+        var bytes = buildSurveyReceiptPdf(done, form);
+        DixiPdf.save(bytes, 'Bukti-Angket-DIXIGRAM-' + done.code + '.pdf');
+        toast('Bukti pengisian diunduh', 'File PDF tersimpan di folder unduhan. Tidak muncul? Buka di tab baru.', 'success', 8000, { label: 'Buka PDF', action: 'pdf-open-last' });
+      } catch (err) {
+        toast('PDF gagal dibuat', String(err && err.message || err), 'error');
+      }
+    });
+    return true;
+  }
+  return false;
+}
+
+function loadSurveyForm(cb) {
+  var st = svState();
+  if (st.form) return cb(st.form);
+  apiCall('apiSurveyForm').then(function (data) { st.form = data; cb(data); })
+    .catch(function (err) { toast('Angket belum bisa dimuat', err.message || '', 'error'); });
+}
+
+/* Input formulir (delegasi) */
+document.addEventListener('change', function (event) {
+  var el = event.target;
+  if (!el || !el.closest || !el.closest('#survey-form')) return;
+  var st = svState();
+  var field = el.getAttribute('data-sv-field');
+  if (field === 'consent') { st.consent = el.checked; svSaveDraft(); return; }
+  var id = el.getAttribute('data-sv-item');
+  if (!id) return;
+  var item = null;
+  svSections().forEach(function (sec) { sec.items.forEach(function (i) { if (i.id === id) item = i; }); });
+  if (!item || item.type === 'text') return;
+  if (item.type === 'multi') {
+    var list = Array.isArray(st.answers[id]) ? st.answers[id].slice() : [];
+    var pos = list.indexOf(el.value);
+    if (el.checked && pos === -1) {
+      if (item.max && list.length >= item.max) {
+        el.checked = false;
+        toast('Batas pilihan', 'Pilih maksimal ' + item.max + ' fitur.', 'warning');
+        return;
+      }
+      list.push(el.value);
+    }
+    if (!el.checked && pos !== -1) list.splice(pos, 1);
+    st.answers[id] = list;
+  } else if (item.type === 'choice') {
+    st.answers[id] = el.value;
+  } else if (item.type !== 'text') {
+    st.answers[id] = Number(el.value);
+  }
+  st.missing = st.missing.filter(function (m) { return m !== id; });
+  svSaveDraft();
+  // perbarui tampilan butir ini saja (tanpa render ulang seluruh halaman)
+  var box = document.getElementById('sv-item-' + id);
+  if (box) {
+    var holder = document.createElement('div');
+    holder.innerHTML = svItemHTML(item, 0);
+    box.replaceWith(holder.firstChild);
+  }
+});
+
+document.addEventListener('input', function (event) {
+  var el = event.target;
+  if (!el || !el.closest || !el.closest('#survey-form')) return;
+  var st = svState();
+  var field = el.getAttribute('data-sv-field');
+  if (field === 'nim' || field === 'nimConfirm') {
+    st[field] = el.value;
+    svSaveDraft();
+    var box = document.getElementById('sv-error');
+    if (box) box.classList.remove('is-visible');
+    return;
+  }
+  var id = el.getAttribute('data-sv-item');
+  if (id && el.tagName === 'TEXTAREA') {
+    st.answers[id] = el.value;
+    var counter = document.querySelector('[data-sv-count="' + id + '"]');
+    if (counter) counter.textContent = el.value.length + ' / ' + el.getAttribute('maxlength');
+    if (el.value.trim().length) {
+      st.missing = st.missing.filter(function (m) { return m !== id; });
+      var holder = document.getElementById('sv-item-' + id);
+      if (holder && holder.classList.contains('is-missing') && el.value.trim().length >= 20) {
+        holder.classList.remove('is-missing');
+        var msg = holder.querySelector('.sv-missing');
+        if (msg) msg.remove();
+      }
+    }
+    clearTimeout(svState()._t);
+    svState()._t = setTimeout(svSaveDraft, 400);
+  }
+});
+
+/* =========================================================================
+   BUKTI PENGISIAN (PDF)
+   ========================================================================= */
+
+function svAnswerText(item, v, scales) {
+  if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)) return '-';
+  if (item.type === 'likert') return v + ' (' + scales.agree.labels[v - 1] + ')';
+  if (item.type === 'rating') return v + ' (' + scales[item.scale || 'overall'].labels[v - 1] + ')';
+  if (item.type === 'semantic') return v + ' (' + item.options[v - 1] + ')';
+  if (item.type === 'nps') return String(v) + ' dari 10';
+  if (Array.isArray(v)) return v.join('; ');
+  return String(v);
+}
+
+function buildSurveyReceiptPdf(done, form) {
+  var pdf = DixiPdf.create({ title: 'Bukti Pengisian Angket DIXIGRAM ' + done.code, author: 'DIXIGRAM', subject: 'Angket Respon Pengguna' });
+  var M = 48, W = pdf.W - M * 2;
+  var y = 0;
+  var C = { brand: '#003cb4', ink: '#0b1a3a', muted: '#5b6785', line: '#e2e7f2', soft: '#f4f6fc' };
+
+  function header() {
+    pdf.page();
+    pdf.rect(0, 0, pdf.W, 6, { fill: C.brand });
+    pdf.logo(M, 26, 26);
+    pdf.text(M + 34, 38, 'DIXIGRAM', { font: 'B', size: 12, color: C.brand });
+    pdf.text(M + 34, 50, 'Angket Respon Pengguna', { size: 8.5, color: C.muted });
+    pdf.text(pdf.W - M, 38, 'BUKTI PENGISIAN', { font: 'B', size: 9, color: C.muted, align: 'right' });
+    pdf.text(pdf.W - M, 50, done.code, { font: 'B', size: 9, color: C.ink, align: 'right' });
+    pdf.line(M, 64, pdf.W - M, 64);
+    y = 84;
+  }
+  function ensure(h) { if (y + h > pdf.H - 60) header(); }
+
+  header();
+  pdf.text(M, y + 14, 'Bukti Pengisian Angket', { font: 'B', size: 20, color: C.ink });
+  y += 26;
+  y += pdf.para(M, y, done.title || form.settings.title, W, { size: 10, color: C.muted }) + 12;
+
+  pdf.rect(M, y, W, 64, { fill: C.soft, r: 8 });
+  var cols = [['Kode responden', done.code], ['NIM', done.nim], ['Waktu pengisian', svFormatDate(done.submittedAt)]];
+  cols.forEach(function (c, i) {
+    var x = M + 16 + i * (W / 3);
+    pdf.text(x, y + 24, c[0].toUpperCase(), { size: 7.5, font: 'B', color: C.muted });
+    pdf.text(x, y + 44, c[1], { size: 13, font: 'B', color: C.ink });
+  });
+  y += 82;
+  y += pdf.para(M, y, 'Dokumen ini menyatakan bahwa responden dengan NIM di atas telah mengisi Angket Respon Pengguna DIXIGRAM secara lengkap. ' +
+    'Ringkasan jawaban tercantum di bawah. Jawaban dianalisis secara agregat untuk keperluan penelitian.', W, { size: 9.5, color: C.ink }) + 14;
+
+  form.instrument.sections.forEach(function (sec) {
+    ensure(48);
+    pdf.text(M, y + 10, sec.id + '. ' + sec.title, { font: 'B', size: 11, color: C.brand });
+    y += 18;
+    sec.items.forEach(function (item) {
+      var answer = svAnswerText(item, done.answers[item.id], form.scales);
+      var qLines = pdf.wrap(item.text, 'R', 8.5, W * 0.56 - 26);
+      var aLines = pdf.wrap(answer, 'B', 8.5, W * 0.42);
+      var h = Math.max(qLines.length, aLines.length) * 11.5 + 8;
+      ensure(h);
+      pdf.text(M, y + 9, item.id, { font: 'B', size: 8, color: C.muted });
+      qLines.forEach(function (l, i) { pdf.text(M + 26, y + 9 + i * 11.5, l, { size: 8.5, color: C.ink }); });
+      aLines.forEach(function (l, i) { pdf.text(M + W * 0.58, y + 9 + i * 11.5, l, { font: 'B', size: 8.5, color: C.ink }); });
+      y += h;
+      pdf.line(M, y - 3, pdf.W - M, y - 3, { color: C.line, lw: 0.5 });
+    });
+    y += 8;
+  });
+
+  var total = pdf.pageCount();
+  for (var p = 1; p <= total; p++) {
+    pdf.setPage(p);
+    pdf.line(M, pdf.H - 40, pdf.W - M, pdf.H - 40);
+    pdf.text(M, pdf.H - 26, 'DIXIGRAM · Bukti pengisian angket ' + done.code, { size: 7.5, color: C.muted });
+    pdf.text(pdf.W - M, pdf.H - 26, 'Halaman ' + p + ' dari ' + total, { size: 7.5, color: C.muted, align: 'right' });
+  }
+  return pdf.output();
+}
+</script>

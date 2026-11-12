@@ -1,0 +1,1000 @@
+<script>
+'use strict';
+
+/* =========================================================================
+   DIXIGRAM — Hasil Angket (panel admin)
+   File: SurveyAdmin.html
+   - Analisis: rerata, SD, persentase, kategori, SUS, NPS, Cronbach's alpha
+   - Laporan resmi (PDF) dan data mentah (CSV)
+   ========================================================================= */
+
+var SVA_LIKERT_COLORS = ['#d64545', '#f08c52', '#c3c9d6', '#6f9cf0', '#003cb4'];
+var SVA_SEMANTIC_COLORS = ['#4f86e8', '#a9c3f7', '#16a34a', '#f6b26b', '#e06666'];
+var SVA_CATEGORY = [
+  { min: 81, label: 'Sangat baik', color: '#0f8a5f' },
+  { min: 61, label: 'Baik', color: '#2d6cdf' },
+  { min: 41, label: 'Cukup', color: '#c98a00' },
+  { min: 21, label: 'Kurang', color: '#d9622b' },
+  { min: 0, label: 'Sangat kurang', color: '#c0392b' }
+];
+var SVA_SUS_GRADES = [
+  [84.1, 'A+'], [80.8, 'A'], [78.9, 'A-'], [77.2, 'B+'], [74.1, 'B'], [72.6, 'B-'],
+  [71.1, 'C+'], [65.0, 'C'], [62.7, 'C-'], [51.7, 'D'], [0, 'F']
+];
+
+/* =========================================================================
+   STATISTIK
+   ========================================================================= */
+
+function svaMean(a) { return a.length ? a.reduce(function (s, v) { return s + v; }, 0) / a.length : 0; }
+function svaSd(a) {
+  if (a.length < 2) return 0;
+  var m = svaMean(a);
+  return Math.sqrt(a.reduce(function (s, v) { return s + (v - m) * (v - m); }, 0) / (a.length - 1));
+}
+function svaVar(a) { var sd = svaSd(a); return sd * sd; }
+function svaMedian(a) {
+  if (!a.length) return 0;
+  var s = a.slice().sort(function (x, y) { return x - y; });
+  var mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+function svaFix(v, d) { return (Math.round(v * Math.pow(10, d)) / Math.pow(10, d)).toFixed(d).replace('.', ','); }
+function svaPct(v) { return svaFix(v, 1) + '%'; }
+function svaCategory(pct) {
+  for (var i = 0; i < SVA_CATEGORY.length; i++) if (pct >= SVA_CATEGORY[i].min - 0.0001 || i === SVA_CATEGORY.length - 1) return SVA_CATEGORY[i];
+  return SVA_CATEGORY[SVA_CATEGORY.length - 1];
+}
+function svaSusGrade(score) {
+  for (var i = 0; i < SVA_SUS_GRADES.length; i++) if (score >= SVA_SUS_GRADES[i][0]) return SVA_SUS_GRADES[i][1];
+  return 'F';
+}
+function svaSusAcceptability(score) {
+  if (score >= 70) return 'Dapat diterima (acceptable)';
+  if (score >= 50) return 'Marginal';
+  return 'Tidak dapat diterima';
+}
+function svaAlphaLabel(a) {
+  if (a === null || isNaN(a)) return 'Belum dapat dihitung';
+  if (a >= 0.9) return 'Sangat baik';
+  if (a >= 0.8) return 'Baik';
+  if (a >= 0.7) return 'Dapat diterima';
+  if (a >= 0.6) return 'Dipertanyakan';
+  if (a >= 0.5) return 'Buruk';
+  return 'Tidak dapat diterima';
+}
+
+/** Cronbach's alpha. rows = array respons, tiap respons = array skor butir. */
+function svaAlpha(rows) {
+  if (rows.length < 3 || !rows[0] || rows[0].length < 2) return null;
+  var k = rows[0].length;
+  var itemVars = 0;
+  for (var j = 0; j < k; j++) itemVars += svaVar(rows.map(function (r) { return r[j]; }));
+  var totalVar = svaVar(rows.map(function (r) { return r.reduce(function (s, v) { return s + v; }, 0); }));
+  if (!totalVar) return null;
+  return (k / (k - 1)) * (1 - itemVars / totalVar);
+}
+
+function svaSusScore(ans) {
+  var total = 0;
+  for (var i = 1; i <= 10; i++) {
+    var v = Number(ans['B' + i]);
+    if (!(v >= 1 && v <= 5)) return null;
+    total += i % 2 ? v - 1 : 5 - v;
+  }
+  return total * 2.5;
+}
+
+function svaAnalyze(data) {
+  var inst = data.instrument;
+  var R = data.responses.slice().sort(function (a, b) { return String(a.submittedAt).localeCompare(String(b.submittedAt)); });
+  var n = R.length;
+  var out = { n: n, target: data.settings.target, settings: data.settings, instrument: inst, scales: data.scales, responses: R };
+  out.rate = out.target ? n / out.target * 100 : 0;
+  out.firstAt = n ? R[0].submittedAt : '';
+  out.lastAt = n ? R[n - 1].submittedAt : '';
+
+  var items = {};
+  var sectionOf = {};
+  inst.sections.forEach(function (sec) {
+    sec.items.forEach(function (it) {
+      sectionOf[it.id] = sec;
+      var vals = R.map(function (r) { return r.answers[it.id]; });
+      var st = { item: it, section: sec.id };
+      if (it.type === 'likert' || it.type === 'semantic' || it.type === 'rating' || it.type === 'nps') {
+        var nums = vals.filter(function (v) { return v !== null && v !== undefined && v !== '' && !isNaN(v); }).map(Number);
+        var max = it.type === 'nps' ? 10 : 5;
+        var min = it.type === 'nps' ? 0 : 1;
+        st.values = nums; st.n = nums.length; st.mean = svaMean(nums); st.sd = svaSd(nums);
+        st.dist = []; for (var v = min; v <= max; v++) st.dist.push(nums.filter(function (x) { return x === v; }).length);
+        if (it.type === 'likert' || it.type === 'rating') {
+          st.pct = nums.length ? nums.reduce(function (s, x) { return s + x; }, 0) / (nums.length * 5) * 100 : 0;
+          st.cat = svaCategory(st.pct);
+        }
+        if (it.type === 'semantic') {
+          st.pctLow = nums.length ? (st.dist[0] + st.dist[1]) / nums.length * 100 : 0;
+          st.pctMid = nums.length ? st.dist[2] / nums.length * 100 : 0;
+          st.pctHigh = nums.length ? (st.dist[3] + st.dist[4]) / nums.length * 100 : 0;
+        }
+      } else if (it.type === 'choice' || it.type === 'multi') {
+        st.counts = it.options.map(function (o) {
+          return { label: o, count: vals.filter(function (v) { return it.type === 'multi' ? (Array.isArray(v) && v.indexOf(o) !== -1) : v === o; }).length };
+        });
+      } else if (it.type === 'text') {
+        st.texts = R.map(function (r) { return { code: r.code, text: String(r.answers[it.id] || '').trim(), consent: r.answers.I7 === 'Ya, bersedia' }; })
+          .filter(function (t) { return t.text; });
+      }
+      items[it.id] = st;
+    });
+  });
+  out.items = items;
+
+  // SUS
+  var susScores = R.map(function (r) { return r.sus !== null && r.sus !== undefined && r.sus !== '' ? Number(r.sus) : svaSusScore(r.answers); })
+    .filter(function (v) { return v !== null && !isNaN(v); });
+  out.sus = {
+    scores: susScores, mean: svaMean(susScores), sd: svaSd(susScores), median: svaMedian(susScores),
+    min: susScores.length ? Math.min.apply(null, susScores) : 0, max: susScores.length ? Math.max.apply(null, susScores) : 0,
+    acceptable: susScores.filter(function (s) { return s >= 70; }).length,
+    marginal: susScores.filter(function (s) { return s >= 50 && s < 70; }).length,
+    notAcceptable: susScores.filter(function (s) { return s < 50; }).length,
+    grades: {}
+  };
+  susScores.forEach(function (s) { var g = svaSusGrade(s).charAt(0); out.sus.grades[g] = (out.sus.grades[g] || 0) + 1; });
+  out.sus.grade = svaSusGrade(out.sus.mean);
+  out.sus.acceptability = svaSusAcceptability(out.sus.mean);
+  out.sus.alpha = svaAlpha(R.map(function (r) {
+    var row = [];
+    for (var i = 1; i <= 10; i++) { var v = Number(r.answers['B' + i]); row.push(i % 2 ? v - 1 : 5 - v); }
+    return row;
+  }));
+
+  // Aspek (Likert positif)
+  out.aspects = inst.sections.filter(function (s) { return s.aspect && !s.sus; }).map(function (sec) {
+    var likert = sec.items.filter(function (i) { return i.type === 'likert'; });
+    var perResp = R.map(function (r) { return likert.map(function (i) { return Number(r.answers[i.id]); }); })
+      .filter(function (row) { return row.every(function (v) { return v >= 1 && v <= 5; }); });
+    var respMeans = perResp.map(function (row) { return svaMean(row); });
+    var sum = perResp.reduce(function (s, row) { return s + row.reduce(function (a, b) { return a + b; }, 0); }, 0);
+    var pct = perResp.length ? sum / (perResp.length * likert.length * 5) * 100 : 0;
+    return {
+      id: sec.id, title: sec.title, aspect: sec.aspect, items: likert.map(function (i) { return items[i.id]; }),
+      k: likert.length, mean: svaMean(respMeans), sd: svaSd(respMeans), pct: pct, cat: svaCategory(pct),
+      alpha: svaAlpha(perResp)
+    };
+  });
+  var allLikert = [];
+  out.aspects.forEach(function (a) { a.items.forEach(function (st) { allLikert.push(st.item.id); }); });
+  var allRows = R.map(function (r) { return allLikert.map(function (id) { return Number(r.answers[id]); }); })
+    .filter(function (row) { return row.every(function (v) { return v >= 1 && v <= 5; }); });
+  var allSum = allRows.reduce(function (s, row) { return s + row.reduce(function (a, b) { return a + b; }, 0); }, 0);
+  out.overall = {
+    k: allLikert.length,
+    pct: allRows.length ? allSum / (allRows.length * allLikert.length * 5) * 100 : 0,
+    mean: svaMean(allRows.map(function (row) { return svaMean(row); })),
+    sd: svaSd(allRows.map(function (row) { return svaMean(row); })),
+    alpha: svaAlpha(allRows)
+  };
+  out.overall.cat = svaCategory(out.overall.pct);
+  var ranked = allLikert.map(function (id) { return items[id]; }).filter(function (s) { return s.n; })
+    .sort(function (a, b) { return a.mean - b.mean; });
+  out.lowest = ranked.slice(0, 5);
+  out.highest = ranked.slice().reverse().slice(0, 5);
+
+  // NPS
+  var nps = items.I2 ? items.I2.values : [];
+  var prom = nps.filter(function (v) { return v >= 9; }).length;
+  var det = nps.filter(function (v) { return v <= 6; }).length;
+  out.nps = {
+    n: nps.length, promoters: prom, passives: nps.length - prom - det, detractors: det,
+    score: nps.length ? Math.round((prom - det) / nps.length * 100) : 0, mean: svaMean(nps)
+  };
+
+  // Kualitas data
+  var durations = R.map(function (r) { return Number(r.durationSec) || 0; }).filter(function (d) { return d > 0; });
+  out.quality = {
+    medianDuration: svaMedian(durations),
+    fast: R.filter(function (r) { return r.durationSec > 0 && r.durationSec < SV_MIN_SECONDS; }).map(function (r) { return r.code; }),
+    straight: R.filter(function (r) {
+      var ids = allLikert.concat(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10']);
+      var first = r.answers[ids[0]];
+      return ids.every(function (id) { return r.answers[id] === first; });
+    }).map(function (r) { return r.code; })
+  };
+  return out;
+}
+
+/* =========================================================================
+   PANEL ADMIN
+   ========================================================================= */
+
+function svaState() {
+  var st = adminState();
+  if (!st.survey) st.survey = { data: null, loading: false, error: '', at: 0, includeNim: false, busy: '' };
+  return st.survey;
+}
+
+function loadAdminSurvey(force) {
+  var s = svaState();
+  if (s.loading || (!force && s.data && Date.now() - s.at < ADMIN_FRESH_MS)) return;
+  s.loading = true;
+  s.error = '';
+  apiCall('apiAdminSurvey', DIXI_STATE.token)
+    .then(function (data) { s.data = data; s.at = Date.now(); s.loading = false; s.analysis = svaAnalyze(data); rerenderAdmin(); })
+    .catch(function (err) { s.loading = false; s.error = err.message || 'Data angket belum bisa dimuat.'; rerenderAdmin(); });
+}
+
+function svaBar(pct, color) {
+  return '<div class="sva-bar"><span style="width:' + Math.max(0, Math.min(100, pct)).toFixed(1) + '%;background:' + color + '"></span></div>';
+}
+
+function svaDistHTML(dist, colors, labels) {
+  var total = dist.reduce(function (s, v) { return s + v; }, 0) || 1;
+  return '<div class="sva-dist">' + dist.map(function (c, i) {
+    return c ? '<span style="width:' + (c / total * 100).toFixed(2) + '%;background:' + colors[i] + '" title="' + esc((labels ? labels[i] : (i + 1)) + ': ' + c) + '"></span>' : '';
+  }).join('') + '</div>';
+}
+
+function adminSurveyTabHTML() {
+  var s = svaState();
+  if (!s.data) return s.error
+    ? '<div class="error-page" style="margin:3vh auto;"><div class="error-icon">' + icon('info') + '</div><h1>Data angket belum bisa dimuat</h1><p>' + esc(s.error) + '</p>' +
+      '<button class="btn btn-primary" data-action="sva-refresh">' + icon('rotate') + ' Coba lagi</button></div>'
+    : adminLoadingHTML('Memuat hasil angket…');
+
+  var A = s.analysis;
+  var set = s.data.settings;
+  var dbUrl = adminState().overview && adminState().overview.dbUrl;
+  var empty = !A.n;
+
+  var head = '<section class="panel sva-head">' +
+    '<div class="sva-head-copy"><span class="sv-cta-kicker">Angket respon pengguna · instrumen v' + esc(A.instrument.version) + '</span>' +
+      '<h2>' + A.n + ' dari ' + A.target + ' responden</h2>' +
+      svaBar(Math.min(100, A.rate), 'var(--brand)') +
+      '<p class="sva-sub">' + svaPct(A.rate) + ' dari target' + (A.n ? ' · ' + esc(svFormatDate(A.firstAt)) + ' – ' + esc(svFormatDate(A.lastAt)) : '') +
+      ' · Angket ' + (set.open ? '<strong class="sva-open">dibuka</strong>' : '<strong class="sva-closed">ditutup</strong>') + '</p></div>' +
+    '<div class="sva-actions">' +
+      '<button class="btn btn-primary" data-action="sva-pdf"' + (empty || s.busy ? ' disabled' : '') + '>' + (s.busy === 'pdf' ? '<span class="spinner"></span> Menyusun…' : icon('file-text') + ' Unduh laporan PDF') + '</button>' +
+      '<button class="btn btn-ghost" data-action="sva-csv"' + (empty ? ' disabled' : '') + '>' + icon('table') + ' Unduh data (CSV)</button>' +
+      (dbUrl ? '<a class="btn btn-ghost" href="' + esc(dbUrl) + '" target="_blank" rel="noopener">' + icon('link') + ' Google Sheets</a>' : '') +
+      '<button class="btn btn-ghost btn-sm" data-action="sva-refresh">' + icon('rotate') + ' Muat ulang</button>' +
+      '<label class="check-row sva-check"><input type="checkbox" data-sva-nim' + (s.includeNim ? ' checked' : '') + '><span>Sertakan lampiran daftar NIM di laporan</span></label>' +
+    '</div>' +
+  '</section>';
+
+  if (empty) {
+    return head + '<section class="panel"><div class="empty-state">' +
+      '<div class="empty-icon">' + icon('clipboard') + '</div><h3>Belum ada jawaban</h3><p>Responden mengisi angket lewat tombol <strong>Angket penelitian</strong> di bagian bawah aplikasi, setelah menyelesaikan minimal satu latihan.</p></div></section>' +
+      adminSurveySettingsHTML(set);
+  }
+
+  var stats = '<div class="sva-stats">' +
+    svaStatCard('Skor SUS', svaFix(A.sus.mean, 1), 'Grade ' + A.sus.grade + ' · ' + A.sus.acceptability.split(' (')[0]) +
+    svaStatCard('Respon pengguna', svaPct(A.overall.pct), A.overall.cat.label + ' · ' + A.overall.k + ' butir') +
+    svaStatCard('Penilaian umum', svaFix(A.items.I1.mean, 2) + ' / 5', svaPct(A.items.I1.pct) + ' · ' + A.items.I1.cat.label) +
+    svaStatCard('Net Promoter Score', (A.nps.score > 0 ? '+' : '') + A.nps.score, A.nps.promoters + ' promotor · ' + A.nps.detractors + ' detraktor') +
+  '</div>';
+
+  var aspects = '<section class="panel"><div class="panel-head"><h2>Respon per aspek</h2></div><div class="panel-body">' +
+    '<div class="sva-table-wrap"><table class="sva-table"><thead><tr><th>Aspek</th><th>Butir</th><th>Rerata</th><th>%</th><th>Kategori</th><th class="sva-col-bar"></th></tr></thead><tbody>' +
+    '<tr><td><strong>Kegunaan sistem (SUS)</strong></td><td>10</td><td>' + svaFix(A.sus.mean, 1) + '</td><td>–</td><td>Grade ' + A.sus.grade + '</td><td class="sva-col-bar">' + svaBar(A.sus.mean, '#6d4aff') + '</td></tr>' +
+    A.aspects.map(function (a) {
+      return '<tr><td><strong>' + esc(a.aspect) + '</strong></td><td>' + a.k + '</td><td>' + svaFix(a.mean, 2) + '</td><td>' + svaPct(a.pct) + '</td>' +
+        '<td><span class="sva-cat" style="--c:' + a.cat.color + '">' + a.cat.label + '</span></td><td class="sva-col-bar">' + svaBar(a.pct, a.cat.color) + '</td></tr>';
+    }).join('') +
+    '</tbody></table></div></div></section>';
+
+  var semantic = '<section class="panel"><div class="panel-head"><h2>Kesulitan, jumlah soal, dan level</h2></div><div class="panel-body sva-sem">' +
+    ['G1', 'G2', 'G3', 'G4'].map(function (id) {
+      var st = A.items[id];
+      return '<div class="sva-sem-row"><div class="sva-sem-q"><strong>' + esc(st.item.text) + '</strong><span>' +
+        svaPct(st.pctMid) + ' memilih "' + esc(st.item.options[2]) + '" · rerata ' + svaFix(st.mean, 2) + '</span></div>' +
+        svaDistHTML(st.dist, SVA_SEMANTIC_COLORS, st.item.options) +
+        '<div class="sva-sem-legend">' + st.item.options.map(function (o, i) {
+          return '<span><i style="background:' + SVA_SEMANTIC_COLORS[i] + '"></i>' + esc(o) + ' (' + st.dist[i] + ')</span>';
+        }).join('') + '</div></div>';
+    }).join('') + '</div></section>';
+
+  var low = '<section class="panel"><div class="panel-head"><h2>Butir dengan skor terendah</h2></div><div class="panel-body">' +
+    '<p class="panel-sub" style="padding:0 0 8px">Prioritas revisi produk pada tahap Evaluation.</p>' +
+    A.lowest.slice(0, 5).map(function (st) {
+      return '<div class="sva-low"><span class="sva-low-id">' + st.item.id + '</span><span class="sva-low-text">' + esc(st.item.text) + '</span><strong>' + svaFix(st.mean, 2) + '</strong></div>';
+    }).join('') + '</div></section>';
+
+  var rows = A.responses.slice().reverse().map(function (r) {
+    var flags = [];
+    if (A.quality.fast.indexOf(r.code) !== -1) flags.push('cepat');
+    if (A.quality.straight.indexOf(r.code) !== -1) flags.push('seragam');
+    return '<tr><td><strong>' + esc(r.code) + '</strong></td><td>' + esc(r.nim) + '</td><td>' + esc(svFormatDate(r.submittedAt)) + '</td><td>' + esc(r.access) + '</td>' +
+      '<td>' + (r.sus === null ? '–' : svaFix(r.sus, 1)) + '</td><td>' + svaDuration(r.durationSec) + '</td>' +
+      '<td>' + (flags.length ? flags.map(function (f) { return '<span class="sva-flag">' + f + '</span>'; }).join(' ') : '') + '</td>' +
+      '<td><button class="icon-btn sva-del" data-action="sva-delete" data-id="' + esc(r.id) + '" data-code="' + esc(r.code) + '" title="Hapus jawaban" aria-label="Hapus jawaban ' + esc(r.code) + '">' + icon('trash') + '</button></td></tr>';
+  }).join('');
+  var table = '<section class="panel"><div class="panel-head"><h2>Daftar responden</h2></div>' +
+    '<div class="panel-sub">Tanda <em>cepat</em> = diisi kurang dari 3 menit; <em>seragam</em> = semua pernyataan dijawab sama. Periksa sebelum analisis akhir.</div>' +
+    '<div class="panel-body"><div class="sva-table-wrap"><table class="sva-table sva-table--resp"><thead><tr><th>Kode</th><th>NIM</th><th>Waktu</th><th>Akses</th><th>SUS</th><th>Durasi</th><th>Catatan</th><th></th></tr></thead><tbody>' +
+    rows + '</tbody></table></div></div></section>';
+
+  return head + stats + aspects + semantic + low + table + adminSurveySettingsHTML(set);
+}
+
+function svaStatCard(label, value, sub) {
+  return '<div class="sva-stat"><span>' + esc(label) + '</span><strong>' + esc(value) + '</strong><small>' + esc(sub) + '</small></div>';
+}
+
+function svaDuration(sec) {
+  sec = Number(sec) || 0;
+  if (!sec) return '–';
+  var m = Math.floor(sec / 60), s = sec % 60;
+  return m + 'm ' + ('0' + s).slice(-2) + 'd';
+}
+
+function adminSurveySettingsHTML(set) {
+  return '<section class="panel"><div class="panel-head"><h2>Pengaturan angket</h2></div>' +
+    '<form class="panel-body sva-settings" id="sva-settings-form" novalidate>' +
+      adminSwitchHTML('svaOpen', 'Angket dibuka', 'Bila dimatikan, tombol angket menampilkan "Angket sedang ditutup".', set.open) +
+      '<div class="sva-grid">' +
+        '<div class="field"><label for="svaTarget">Target responden</label><input class="input input--plain" id="svaTarget" type="number" min="1" max="100000" value="' + esc(set.target) + '"></div>' +
+        '<div class="field"><label for="svaResearcher">Nama peneliti</label><input class="input input--plain" id="svaResearcher" maxlength="120" value="' + esc(set.researcher) + '"></div>' +
+        '<div class="field"><label for="svaInstitution">Institusi / program studi</label><input class="input input--plain" id="svaInstitution" maxlength="160" placeholder="Contoh: Program Studi Pendidikan Bahasa Inggris, Universitas …" value="' + esc(set.institution) + '"></div>' +
+        '<div class="field"><label for="svaContact">Kontak untuk responden</label><input class="input input--plain" id="svaContact" maxlength="160" value="' + esc(set.contact) + '"></div>' +
+      '</div>' +
+      '<div class="field"><label for="svaTitle">Judul penelitian</label><textarea class="input input--plain admin-textarea" id="svaTitle" rows="2" maxlength="300">' + esc(set.title) + '</textarea></div>' +
+      '<div><button class="btn btn-primary" type="button" data-action="sva-save">' + icon('check') + ' Simpan pengaturan angket</button></div>' +
+    '</form></section>';
+}
+
+function handleSurveyAdminAction(action, el) {
+  var s = svaState();
+  if (action === 'sva-refresh') { loadAdminSurvey(true); return true; }
+  if (action === 'sva-csv') {
+    DixiPdf.saveText(svaCsv(s.analysis), 'Data-Angket-DIXIGRAM-' + svaStamp() + '.csv');
+    toast('Data diunduh', 'CSV berisi semua jawaban, satu kolom per butir.', 'success');
+    return true;
+  }
+  if (action === 'sva-pdf') {
+    s.busy = 'pdf';
+    rerenderAdmin();
+    setTimeout(function () {
+      try {
+        var bytes = buildSurveyReportPdf(s.analysis, { includeNim: s.includeNim });
+        DixiPdf.save(bytes, 'Laporan-Angket-DIXIGRAM-' + svaStamp() + '.pdf');
+        toast('Laporan diunduh', 'Laporan PDF tersimpan di folder unduhan. Tidak muncul? Buka di tab baru.', 'success', 8000, { label: 'Buka PDF', action: 'pdf-open-last' });
+      } catch (err) {
+        console.error(err);
+        toast('Laporan gagal dibuat', String(err && err.message || err), 'error');
+      }
+      s.busy = '';
+      rerenderAdmin();
+    }, 30);
+    return true;
+  }
+  if (action === 'sva-delete') {
+    var id = el.getAttribute('data-id');
+    var code = el.getAttribute('data-code');
+    confirmDialog({
+      title: 'Hapus jawaban ' + code + '?', danger: true, icon: 'trash',
+      message: '<p>Jawaban ini dihapus permanen dari sheet <strong>DIXI_Survey</strong>. NIM tersebut bisa mengisi ulang.</p>',
+      confirmLabel: 'Hapus',
+      onConfirm: function () {
+        apiCall('apiAdminSurveyDelete', DIXI_STATE.token, id)
+          .then(function () { toast('Jawaban dihapus', code + ' dihapus dari data angket.', 'success'); loadAdminSurvey(true); })
+          .catch(function (err) { toast('Gagal menghapus', err.message || '', 'error'); });
+      }
+    });
+    return true;
+  }
+  if (action === 'sva-save') {
+    var form = document.getElementById('sva-settings-form');
+    if (!form) return true;
+    var patch = {
+      open: form.querySelector('#svaOpen').checked,
+      target: Number(form.querySelector('#svaTarget').value),
+      researcher: form.querySelector('#svaResearcher').value,
+      institution: form.querySelector('#svaInstitution').value,
+      contact: form.querySelector('#svaContact').value,
+      title: form.querySelector('#svaTitle').value
+    };
+    setButtonLoading(el, true, 'Menyimpan…');
+    apiCall('apiAdminSurveySettings', DIXI_STATE.token, patch)
+      .then(function (res) {
+        s.data.settings = res.settings;
+        s.analysis = svaAnalyze(s.data);
+        if (DIXI_STATE.boot) DIXI_STATE.boot.survey = { open: res.settings.open };
+        toast('Pengaturan angket disimpan', res.settings.open ? 'Angket dibuka untuk responden.' : 'Angket ditutup.', 'success');
+        rerenderAdmin();
+      })
+      .catch(function (err) { setButtonLoading(el, false); toast('Gagal menyimpan', err.message || '', 'error'); });
+    return true;
+  }
+  return false;
+}
+
+document.addEventListener('change', function (event) {
+  var el = event.target;
+  if (el && el.hasAttribute && el.hasAttribute('data-sva-nim')) svaState().includeNim = el.checked;
+});
+
+function svaStamp() {
+  var d = new Date();
+  return d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
+}
+
+/* =========================================================================
+   CSV
+   ========================================================================= */
+
+function svaCsv(A) {
+  var items = [];
+  A.instrument.sections.forEach(function (sec) { sec.items.forEach(function (it) { items.push(it); }); });
+  var head = ['Kode', 'NIM', 'Waktu', 'Akses', 'DurasiDetik', 'SkorSUS']
+    .concat(A.aspects.map(function (a) { return 'Rerata_' + a.id; }))
+    .concat(items.map(function (i) { return i.id; }));
+  var q = function (v) {
+    var s = v === null || v === undefined ? '' : String(v);
+    return /[",\n\r;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  var lines = [head.join(',')];
+  A.responses.forEach(function (r) {
+    var row = [r.code, r.nim, r.submittedAt, r.access, r.durationSec, r.sus === null ? '' : r.sus];
+    A.aspects.forEach(function (a) {
+      var vals = a.items.map(function (st) { return Number(r.answers[st.item.id]); }).filter(function (v) { return v >= 1; });
+      row.push(vals.length ? (Math.round(svaMean(vals) * 100) / 100) : '');
+    });
+    items.forEach(function (it) {
+      var v = r.answers[it.id];
+      row.push(Array.isArray(v) ? v.join('; ') : v);
+    });
+    lines.push(row.map(q).join(','));
+  });
+  return lines.join('\r\n');
+}
+
+/* =========================================================================
+   LAPORAN RESMI (PDF)
+   ========================================================================= */
+
+function buildSurveyReportPdf(A, opts) {
+  opts = opts || {};
+  var C = { brand: '#003cb4', brand2: '#2457d6', violet: '#6d4aff', ink: '#0b1a3a', text: '#263452', muted: '#5b6785',
+    line: '#dfe4ef', soft: '#f4f6fc', soft2: '#eaf0ff', white: '#ffffff' };
+  var S = A.settings;
+  var pdf = DixiPdf.create({ title: 'Laporan Hasil Angket Respon Pengguna DIXIGRAM', author: S.researcher || 'DIXIGRAM', subject: S.title });
+  var M = 50, W = pdf.W - M * 2, BOTTOM = pdf.H - 58;
+  var y = 0;
+  var today = svFormatDate(new Date().toISOString()).split(',')[0];
+  var secNo = 0;
+  var tocEntries = [];
+
+  /* ---------- primitif tata letak ---------- */
+  function newPage() {
+    pdf.page();
+    pdf.rect(0, 0, pdf.W, 4, { fill: C.brand });
+    pdf.logo(M, 22, 16);
+    pdf.text(M + 22, 34, 'DIXIGRAM', { font: 'B', size: 8.5, color: C.brand });
+    pdf.text(M + 70, 34, 'Laporan Hasil Angket Respon Pengguna', { size: 8.5, color: C.muted });
+    pdf.text(pdf.W - M, 34, today, { size: 8.5, color: C.muted, align: 'right' });
+    pdf.line(M, 46, pdf.W - M, 46, { color: C.line });
+    y = 68;
+  }
+  function ensure(h) { if (y + h > BOTTOM) newPage(); }
+  function gap(h) { y += h; }
+  function h1(title) {
+    secNo += 1;
+    ensure(80);
+    tocEntries.push({ no: secNo, title: title, page: pdf.pageCount() });
+    pdf.rect(M, y, 26, 26, { fill: C.brand, r: 6 });
+    pdf.text(M + 13, y + 17.5, String(secNo), { font: 'B', size: 12, color: C.white, align: 'center' });
+    pdf.text(M + 38, y + 18.5, title, { font: 'B', size: 15, color: C.ink });
+    y += 40;
+  }
+  function h2(title) {
+    ensure(46);
+    pdf.text(M, y + 11, title, { font: 'B', size: 11, color: C.brand });
+    y += 19;
+  }
+  function para(text, o) {
+    o = o || {};
+    var size = o.size || 9.5;
+    var lines = pdf.wrap(text, o.font || 'R', size, o.w || W);
+    var lh = size * 1.48;
+    lines.forEach(function (line) {
+      ensure(lh);
+      pdf.text(o.x || M, y + size * 0.85, line, { font: o.font || 'R', size: size, color: o.color || C.text });
+      y += lh;
+    });
+    y += o.after === undefined ? 6 : o.after;
+  }
+  function bullets(list, o) {
+    o = o || {};
+    list.forEach(function (t) {
+      var lines = pdf.wrap(t, 'R', 9.5, W - 16);
+      ensure(lines.length * 14);
+      pdf.circle(M + 4, y + 6.5, 1.8, { fill: o.color || C.brand });
+      lines.forEach(function (line) { pdf.text(M + 14, y + 8.5, line, { size: 9.5, color: C.text }); y += 14; });
+      y += 2;
+    });
+    y += 4;
+  }
+  function note(text) { para(text, { size: 8, color: C.muted, after: 8 }); }
+
+  /** Tabel dengan pembungkus teks, zebra, dan ulang kepala tabel saat pindah halaman. */
+  function table(cols, rows, o) {
+    o = o || {};
+    var size = o.size || 8.6;
+    var lh = size * 1.38;
+    var padX = 6, padY = 5;
+    var totalW = cols.reduce(function (s, c) { return s + c.w; }, 0);
+    var scale = W / totalW;
+    cols.forEach(function (c) { c.ww = c.w * scale; });
+    function drawHead() {
+      var hh = 0;
+      var heads = cols.map(function (c) { var l = pdf.wrap(c.title, 'B', size - 0.6, c.ww - padX * 2); hh = Math.max(hh, l.length); return l; });
+      var h = hh * lh + padY * 2;
+      pdf.rect(M, y, W, h, { fill: C.ink });
+      var x = M;
+      cols.forEach(function (c, i) {
+        heads[i].forEach(function (l, j) {
+          var tx = c.align === 'right' ? x + c.ww - padX : c.align === 'center' ? x + c.ww / 2 : x + padX;
+          pdf.text(tx, y + padY + size * 0.82 + j * lh, l, { font: 'B', size: size - 0.6, color: C.white, align: c.align });
+        });
+        x += c.ww;
+      });
+      y += h;
+    }
+    ensure(rows.length <= 8 ? Math.min(BOTTOM - 70, lh + padY * 2 + 4 + rows.reduce(function (sum, row) {
+      var lines = 1;
+      cols.forEach(function (c, i) { if (typeof row[i] === 'string') lines = Math.max(lines, pdf.wrap(row[i], 'R', size, c.w * W / totalW - padX * 2).length); });
+      return sum + lines * lh + padY * 2;
+    }, 0)) : 60);
+    drawHead();
+    rows.forEach(function (row, ri) {
+      var cells = cols.map(function (c, i) {
+        var cell = row[i];
+        if (cell && typeof cell === 'object' && cell.draw) return { draw: cell.draw, lines: [''], h: cell.h || lh };
+        return { lines: pdf.wrap(cell == null ? '' : String(cell), c.font || (row.bold ? 'B' : 'R'), size, c.ww - padX * 2), color: (row.colors && row.colors[i]) || c.color };
+      });
+      var maxLines = Math.max.apply(null, cells.map(function (c) { return c.draw ? Math.ceil((c.h || lh) / lh) : c.lines.length; }));
+      var h = maxLines * lh + padY * 2;
+      if (y + h > BOTTOM) { newPage(); drawHead(); }
+      if (row.bg || ri % 2 === 1) pdf.rect(M, y, W, h, { fill: row.bg || C.soft });
+      var x = M;
+      cells.forEach(function (cell, i) {
+        var c = cols[i];
+        if (cell.draw) cell.draw(x + padX, y + padY, c.ww - padX * 2, h - padY * 2);
+        else cell.lines.forEach(function (l, j) {
+          var tx = c.align === 'right' ? x + c.ww - padX : c.align === 'center' ? x + c.ww / 2 : x + padX;
+          pdf.text(tx, y + padY + size * 0.82 + j * lh, l, { font: c.font || (row.bold ? 'B' : 'R'), size: size, color: cell.color || C.text, align: c.align });
+        });
+        x += c.ww;
+      });
+      y += h;
+      pdf.line(M, y, M + W, y, { color: C.line, lw: 0.5 });
+    });
+    y += o.after === undefined ? 12 : o.after;
+  }
+
+  function hbar(x, yy, w, h, pct, color) {
+    pdf.rect(x, yy, w, h, { fill: '#e8ecf5', r: h / 2 });
+    if (pct > 0) pdf.rect(x, yy, Math.max(h, w * Math.min(100, pct) / 100), h, { fill: color, r: h / 2 });
+  }
+  function dist(x, yy, w, h, counts, colors) {
+    var total = counts.reduce(function (s, v) { return s + v; }, 0);
+    if (!total) { pdf.rect(x, yy, w, h, { fill: '#e8ecf5' }); return; }
+    var cx = x;
+    counts.forEach(function (c, i) {
+      if (!c) return;
+      var ww = w * c / total;
+      pdf.rect(cx, yy, ww, h, { fill: colors[i] });
+      if (ww > 16) pdf.text(cx + ww / 2, yy + h / 2 + 2.6, String(c), { size: 6.8, font: 'B', color: i === 2 && colors === SVA_LIKERT_COLORS ? C.ink : C.white, align: 'center' });
+      cx += ww;
+    });
+  }
+  function legend(labels, colors) {
+    ensure(18);
+    var x = M;
+    labels.forEach(function (l, i) {
+      var w = pdf.width(l, 'R', 7.8) + 22;
+      if (x + w > M + W) { x = M; y += 13; }
+      pdf.rect(x, y + 1, 9, 9, { fill: colors[i], r: 2 });
+      pdf.text(x + 13, y + 8.6, l, { size: 7.8, color: C.muted });
+      x += w;
+    });
+    y += 18;
+  }
+  function catPill(x, yy, cat) {
+    var w = pdf.width(cat.label, 'B', 7.6) + 12;
+    pdf.rect(x, yy, w, 13, { fill: cat.color, r: 6.5 });
+    pdf.text(x + w / 2, yy + 9.2, cat.label, { font: 'B', size: 7.6, color: C.white, align: 'center' });
+  }
+  function f1(v) { return svaFix(v, 1); }
+  function f2(v) { return svaFix(v, 2); }
+  function countBars(counts, total, color) {
+    var rows = counts.slice().sort(function (a, b) { return b.count - a.count; });
+    rows.forEach(function (c) {
+      var pct = total ? c.count / total * 100 : 0;
+      var labelLines = pdf.wrap(c.label, 'R', 8.8, W * 0.42);
+      var h = Math.max(16, labelLines.length * 12 + 4);
+      ensure(h);
+      labelLines.forEach(function (l, i) { pdf.text(M, y + 10 + i * 12, l, { size: 8.8, color: C.text }); });
+      hbar(M + W * 0.45, y + 4, W * 0.38, 8, pct, color || C.brand);
+      pdf.text(M + W, y + 11, c.count + ' (' + svaPct(pct) + ')', { size: 8.4, font: 'B', color: C.ink, align: 'right' });
+      y += h;
+    });
+    y += 6;
+  }
+
+  /* ================= SAMPUL ================= */
+  pdf.page();
+  pdf.rect(0, 0, pdf.W, 300, { fill: C.brand });
+  pdf.rect(0, 300, pdf.W, 6, { fill: C.violet });
+  pdf.rect(M, 52, 46, 46, { fill: C.white, r: 12 });
+  pdf.logo(M + 8, 60, 30);
+  pdf.text(M + 60, 74, 'DIXIGRAM', { font: 'B', size: 18, color: C.white });
+  pdf.text(M + 60, 90, 'Grammar & Vocabulary Game · BeeComp Group', { size: 9, color: '#c9d6ff' });
+  pdf.text(M, 158, 'LAPORAN HASIL ANGKET', { font: 'B', size: 10, color: '#c9d6ff' });
+  pdf.text(M, 190, 'Respon Pengguna', { font: 'B', size: 30, color: C.white });
+  pdf.text(M, 224, 'Aplikasi DIXIGRAM', { font: 'B', size: 30, color: C.white });
+  pdf.text(M, 258, 'Penelitian pengembangan (R&D) model ADDIE · tahap Implementation & Evaluation', { size: 10, color: '#dfe6ff' });
+
+  y = 336;
+  pdf.text(M, y, 'JUDUL PENELITIAN', { font: 'B', size: 8, color: C.muted });
+  y += 8;
+  y += pdf.para(M, y, S.title || '-', W, { font: 'B', size: 13.5, color: C.ink, lineHeight: 19 }) + 16;
+
+  var meta = [
+    ['Peneliti', S.researcher || '-'],
+    ['Institusi', S.institution || '-'],
+    ['Instrumen', 'Angket respon pengguna v' + A.instrument.version + ' · ' + A.instrument.sections.reduce(function (s, x) { return s + x.items.length; }, 0) + ' butir (SUS + skala Likert 1–5)'],
+    ['Responden', A.n + ' mahasiswa dari target ' + A.target + ' (' + svaPct(A.rate) + ')'],
+    ['Periode pengisian', A.n ? svFormatDate(A.firstAt).split(',')[0] + ' – ' + svFormatDate(A.lastAt).split(',')[0] : '-'],
+    ['Tanggal laporan', today]
+  ];
+  meta.forEach(function (m) {
+    var lines = pdf.wrap(m[1], 'R', 9.5, W - 130);
+    pdf.text(M, y + 10, m[0], { font: 'B', size: 9, color: C.muted });
+    lines.forEach(function (l, i) { pdf.text(M + 130, y + 10 + i * 13, l, { size: 9.5, color: C.ink }); });
+    y += Math.max(1, lines.length) * 13 + 6;
+    pdf.line(M, y - 2, M + W, y - 2, { color: C.line, lw: 0.5 });
+  });
+
+  // ringkasan angka
+  y += 18;
+  pdf.text(M, y, 'RINGKASAN HASIL', { font: 'B', size: 8, color: C.muted });
+  y += 10;
+  var tiles = [
+    ['Skor SUS', f1(A.sus.mean), 'Grade ' + A.sus.grade + ' · ' + A.sus.acceptability.split(' (')[0]],
+    ['Respon pengguna', svaPct(A.overall.pct), A.overall.cat.label],
+    ['Penilaian umum', f2(A.items.I1.mean) + ' / 5', A.items.I1.cat.label],
+    ['Net Promoter Score', (A.nps.score > 0 ? '+' : '') + A.nps.score, A.nps.promoters + ' promotor dari ' + A.nps.n],
+    ['Reliabilitas (alpha)', A.overall.alpha === null ? '-' : f2(A.overall.alpha), svaAlphaLabel(A.overall.alpha)],
+    ['Responden', String(A.n), svaPct(A.rate) + ' dari target ' + A.target]
+  ];
+  var tw = (W - 20) / 3, th = 58;
+  tiles.forEach(function (t, i) {
+    var tx = M + (i % 3) * (tw + 10), ty = y + Math.floor(i / 3) * (th + 10);
+    pdf.rect(tx, ty, tw, th, { fill: C.soft, stroke: C.line, lw: 0.6, r: 8 });
+    pdf.text(tx + 12, ty + 16, t[0].toUpperCase(), { font: 'B', size: 7, color: C.muted });
+    pdf.text(tx + 12, ty + 37, t[1], { font: 'B', size: 17, color: C.brand });
+    pdf.text(tx + 12, ty + 50, t[2], { size: 7.8, color: C.text });
+  });
+  y += th * 2 + 30;
+  pdf.text(M, y, 'SIMPULAN SINGKAT', { font: 'B', size: 8, color: C.muted });
+  y += 8;
+  var bestA = A.aspects.slice().sort(function (a, b) { return b.pct - a.pct; })[0];
+  var worstA = A.aspects.slice().sort(function (a, b) { return a.pct - b.pct; })[0];
+  pdf.para(M, y, 'Berdasarkan ' + A.n + ' responden, DIXIGRAM memperoleh skor SUS ' + f1(A.sus.mean) + ' (grade ' + A.sus.grade + ', ' +
+    A.sus.acceptability.split(' (')[0].toLowerCase() + ') dan respon pengguna ' + svaPct(A.overall.pct) + ' (' + A.overall.cat.label.toLowerCase() + '). ' +
+    (bestA ? 'Aspek tertinggi adalah ' + bestA.aspect.toLowerCase() + ' (' + svaPct(bestA.pct) + '), sedangkan aspek yang paling perlu ditingkatkan adalah ' + worstA.aspect.toLowerCase() + ' (' + svaPct(worstA.pct) + '). ' : '') +
+    svaSemanticSentence(A.items.G1), W, { size: 9.5, color: C.text, lineHeight: 14 });
+
+  /* ================= DAFTAR ISI (diisi setelah semua bab selesai) ================= */
+  newPage();
+  var tocPage = pdf.pageCount();
+  pdf.text(M, y + 16, 'Daftar Isi', { font: 'B', size: 18, color: C.ink });
+  var tocY = y + 44;
+
+  /* ================= 1. PENDAHULUAN ================= */
+  newPage();
+  h1('Pendahuluan');
+  para('Laporan ini menyajikan hasil angket respon pengguna terhadap aplikasi DIXIGRAM, media latihan grammar dan vocabulary bahasa Inggris berbasis web. ' +
+    'Angket diberikan kepada mahasiswa setelah mereka menggunakan aplikasi dan menyelesaikan minimal satu latihan. Pengumpulan data ini merupakan bagian dari tahap Implementation dan Evaluation dalam model pengembangan ADDIE (Analysis, Design, Development, Implementation, Evaluation).');
+  para('Tujuan angket adalah (1) mengukur kegunaan (usability) aplikasi, (2) menilai pengalaman pengguna dari sisi tampilan, navigasi, dan kinerja, ' +
+    '(3) menilai kualitas materi dan soal latihan, termasuk tingkat kesulitan, jumlah soal, dan kesesuaian level bahasa, serta (4) menghimpun testimoni dan saran sebagai dasar revisi produk.');
+  h2('Kisi-kisi instrumen');
+  table([
+    { title: 'Bagian', w: 46, align: 'center', font: 'B' }, { title: 'Aspek', w: 170 }, { title: 'Butir', w: 70 },
+    { title: 'Jumlah', w: 48, align: 'center' }, { title: 'Skala / bentuk', w: 160 }
+  ], A.instrument.sections.map(function (sec) {
+    var types = {};
+    sec.items.forEach(function (i) { types[i.type] = true; });
+    var form = sec.sus ? 'Likert 1–5 (SUS, butir genap negatif)' :
+      types.likert ? 'Likert 1–5 (STS–SS)' :
+      types.semantic ? 'Skala 1–5 (nilai tengah = sesuai) + pilihan ganda' :
+      sec.id === 'I' ? 'Rating 1–5, NPS 0–10, pilihan, isian terbuka' : 'Pilihan tunggal';
+    return [sec.id, sec.title, sec.items[0].id + '–' + sec.items[sec.items.length - 1].id, String(sec.items.length), form];
+  }));
+
+  /* ================= 2. METODE ANALISIS ================= */
+  h1('Metode Analisis');
+  para('Data dianalisis secara deskriptif kuantitatif untuk butir tertutup dan secara deskriptif kualitatif untuk jawaban terbuka. Setiap responden hanya dapat mengisi satu kali (dikendalikan dengan NIM), dan angket hanya dapat dibuka setelah responden menyelesaikan minimal satu latihan di aplikasi.');
+  h2('Persentase skor dan kategori');
+  para('Untuk butir Likert bernada positif (bagian C–F dan H), persentase skor dihitung dengan rumus:');
+  ensure(30);
+  pdf.rect(M, y, W, 26, { fill: C.soft2, r: 6 });
+  pdf.text(M + W / 2, y + 17, 'P = (jumlah skor yang diperoleh / (n x jumlah butir x 5)) x 100%', { font: 'B', size: 10, color: C.brand, align: 'center' });
+  y += 36;
+  ensure(180);
+  para('Persentase kemudian ditafsirkan dengan kriteria berikut:', { after: 4 });
+  table([{ title: 'Persentase', w: 120, align: 'center' }, { title: 'Kategori', w: 150 }, { title: 'Rentang rerata setara', w: 150, align: 'center' }], [
+    ['81% – 100%', 'Sangat baik', '4,05 – 5,00'], ['61% – 80%', 'Baik', '3,05 – 4,00'], ['41% – 60%', 'Cukup', '2,05 – 3,00'],
+    ['21% – 40%', 'Kurang', '1,05 – 2,00'], ['0% – 20%', 'Sangat kurang', '1,00']
+  ], { after: 8 });
+  h2('System Usability Scale (SUS)');
+  para('Bagian B memakai 10 butir baku System Usability Scale (Brooke, 1996). Skor butir ganjil dihitung (x − 1) dan butir genap (5 − x). Jumlahnya dikalikan 2,5 sehingga menghasilkan skor 0–100 untuk setiap responden. ' +
+    'Skor ditafsirkan memakai grade kurva Sauro & Lewis (2016), dengan rata-rata global 68, dan kategori penerimaan Bangor dkk. (2008): ≥ 70 dapat diterima, 50–69 marginal, < 50 tidak dapat diterima.');
+  h2('Butir skala kesesuaian, NPS, dan reliabilitas');
+  bullets([
+    'Bagian G (tingkat kesulitan, jumlah soal, level bahasa, jumlah modul) memakai skala 1–5 dengan nilai tengah 3 sebagai posisi ideal ("sesuai"). Hasilnya disajikan sebagai sebaran jawaban dan persentase responden yang memilih nilai tengah.',
+    'Net Promoter Score (NPS) = % promotor (skor 9–10) − % detraktor (skor 0–6), dengan rentang −100 sampai +100.',
+    'Reliabilitas konsistensi internal dihitung dengan Cronbach\'s alpha per aspek. Kriterianya: ≥ 0,90 sangat baik; 0,80–0,89 baik; 0,70–0,79 dapat diterima; 0,60–0,69 dipertanyakan; < 0,60 rendah.'
+  ]);
+
+  /* ================= 3. PROFIL RESPONDEN ================= */
+  h1('Profil Responden');
+  para('Sebanyak ' + A.n + ' mahasiswa mengisi angket secara lengkap (' + svaPct(A.rate) + ' dari target ' + A.target + ' responden). Gambaran penggunaan aplikasi oleh responden adalah sebagai berikut.');
+  A.instrument.sections[0].items.forEach(function (it) {
+    h2(it.id + '. ' + it.text);
+    countBars(A.items[it.id].counts, A.n, C.brand2);
+  });
+
+  /* ================= 4. SUS ================= */
+  h1('Hasil Kegunaan Sistem (SUS)');
+  ensure(96);
+  var boxW = (W - 30) / 4;
+  [['Rerata', f1(A.sus.mean)], ['Simpangan baku', f1(A.sus.sd)], ['Median', f1(A.sus.median)], ['Rentang', f1(A.sus.min) + ' – ' + f1(A.sus.max)]].forEach(function (b, i) {
+    var bx = M + i * (boxW + 10);
+    pdf.rect(bx, y, boxW, 50, { fill: C.soft, stroke: C.line, lw: 0.6, r: 8 });
+    pdf.text(bx + 10, y + 16, b[0].toUpperCase(), { font: 'B', size: 7, color: C.muted });
+    pdf.text(bx + 10, y + 38, b[1], { font: 'B', size: 15, color: C.ink });
+  });
+  y += 62;
+  // skala SUS
+  ensure(70);
+  var sx = M, sw = W, sy = y + 18;
+  [[0, 50, '#f3d0d0'], [50, 70, '#fde7c2'], [70, 100, '#cfeedd']].forEach(function (z) {
+    pdf.rect(sx + sw * z[0] / 100, sy, sw * (z[1] - z[0]) / 100, 12, { fill: z[2] });
+  });
+  pdf.text(sx + sw * 0.25, sy - 4, 'Tidak dapat diterima', { size: 7.4, color: C.muted, align: 'center' });
+  pdf.text(sx + sw * 0.6, sy - 4, 'Marginal', { size: 7.4, color: C.muted, align: 'center' });
+  pdf.text(sx + sw * 0.85, sy - 4, 'Dapat diterima', { size: 7.4, color: C.muted, align: 'center' });
+  pdf.line(sx + sw * 0.68, sy - 2, sx + sw * 0.68, sy + 16, { color: C.muted, lw: 0.8, dash: [2, 2] });
+  pdf.text(sx + sw * 0.68, sy + 26, 'rata-rata global 68', { size: 7, color: C.muted, align: 'center' });
+  var mx = sx + sw * Math.min(100, A.sus.mean) / 100;
+  pdf.polygon([[mx - 6, sy - 9], [mx + 6, sy - 9], [mx, sy - 1]], { fill: C.brand });
+  pdf.rect(mx - 1, sy, 2, 12, { fill: C.brand });
+  [0, 25, 50, 75, 100].forEach(function (t) { pdf.text(sx + sw * t / 100, sy + 26, String(t), { size: 7, color: C.muted, align: t === 0 ? 'left' : t === 100 ? 'right' : 'center' }); });
+  y = sy + 40;
+  para('Skor SUS rata-rata DIXIGRAM adalah ' + f1(A.sus.mean) + ' (SD ' + f1(A.sus.sd) + '), berada pada grade ' + A.sus.grade + ' dengan kategori penerimaan ' + A.sus.acceptability.toLowerCase() + '. ' +
+    (A.sus.mean >= 68 ? 'Skor ini berada di atas rata-rata global SUS (68).' : 'Skor ini berada di bawah rata-rata global SUS (68).') + ' ' +
+    A.sus.acceptable + ' responden (' + svaPct(A.n ? A.sus.acceptable / A.n * 100 : 0) + ') memberi skor ≥ 70, ' + A.sus.marginal + ' responden berada pada rentang marginal, dan ' + A.sus.notAcceptable + ' responden memberi skor < 50.');
+  h2('Rerata per butir SUS');
+  table([{ title: 'No', w: 34, align: 'center', font: 'B' }, { title: 'Pernyataan', w: 270 }, { title: 'Arah', w: 46, align: 'center' },
+    { title: 'Rerata', w: 46, align: 'center' }, { title: 'SD', w: 40, align: 'center' }, { title: 'Sebaran 1–5', w: 110 }],
+    A.instrument.sections[1].items.map(function (it) {
+      var st = A.items[it.id];
+      return [it.id, it.text, it.polarity < 0 ? 'Negatif' : 'Positif', f2(st.mean), f2(st.sd),
+        { draw: function (x, yy, w, h) { dist(x, yy + h / 2 - 5, w, 10, st.dist, SVA_LIKERT_COLORS); }, h: 12 }];
+    }));
+  legend(['1 Sangat tidak setuju', '2 Tidak setuju', '3 Netral', '4 Setuju', '5 Sangat setuju'], SVA_LIKERT_COLORS);
+  note('Untuk butir negatif (genap), rerata yang rendah menunjukkan hasil yang baik. Alpha Cronbach SUS (setelah penyesuaian arah) = ' +
+    (A.sus.alpha === null ? '-' : f2(A.sus.alpha)) + ' (' + svaAlphaLabel(A.sus.alpha).toLowerCase() + ').');
+
+  /* ================= 5. PER ASPEK ================= */
+  h1('Hasil Respon Pengguna per Aspek');
+  para('Tabel berikut merangkum skor setiap aspek respon pengguna. Secara keseluruhan, ' + A.overall.k + ' butir pernyataan positif memperoleh persentase ' + svaPct(A.overall.pct) +
+    ' (rerata ' + f2(A.overall.mean) + ') dengan kategori ' + A.overall.cat.label.toLowerCase() + '.');
+  var aspectRows = A.aspects.map(function (a) {
+    return [a.id, a.aspect, String(a.k), f2(a.mean), f2(a.sd), svaPct(a.pct),
+      { draw: function (x, yy, w, h) { catPill(x, yy + h / 2 - 6.5, a.cat); }, h: 13 },
+      { draw: function (x, yy, w, h) { hbar(x, yy + h / 2 - 4, w, 8, a.pct, a.cat.color); }, h: 12 }];
+  });
+  var totalRow = ['', 'Keseluruhan', String(A.overall.k), f2(A.overall.mean), f2(A.overall.sd), svaPct(A.overall.pct),
+    { draw: function (x, yy, w, h) { catPill(x, yy + h / 2 - 6.5, A.overall.cat); }, h: 13 },
+    { draw: function (x, yy, w, h) { hbar(x, yy + h / 2 - 4, w, 8, A.overall.pct, A.overall.cat.color); }, h: 12 }];
+  totalRow.bold = true; totalRow.bg = C.soft2;
+  aspectRows.push(totalRow);
+  table([{ title: 'Bag.', w: 34, align: 'center', font: 'B' }, { title: 'Aspek', w: 150 }, { title: 'Butir', w: 38, align: 'center' },
+    { title: 'Rerata', w: 46, align: 'center' }, { title: 'SD', w: 40, align: 'center' }, { title: '%', w: 50, align: 'center' },
+    { title: 'Kategori', w: 76 }, { title: '', w: 90 }], aspectRows);
+
+  A.aspects.forEach(function (a) {
+    h2('Bagian ' + a.id + ' · ' + a.title + ' (' + svaPct(a.pct) + ', ' + a.cat.label.toLowerCase() + ')');
+    table([{ title: 'No', w: 34, align: 'center', font: 'B' }, { title: 'Pernyataan', w: 226 }, { title: 'Rerata', w: 44, align: 'center' },
+      { title: 'SD', w: 38, align: 'center' }, { title: '%', w: 46, align: 'center' }, { title: 'Kategori', w: 72 }, { title: 'Sebaran 1–5', w: 96 }],
+      a.items.map(function (st) {
+        return [st.item.id, st.item.text, f2(st.mean), f2(st.sd), svaPct(st.pct), st.cat.label,
+          { draw: function (x, yy, w, h) { dist(x, yy + h / 2 - 5, w, 10, st.dist, SVA_LIKERT_COLORS); }, h: 12 }];
+      }), { after: 4 });
+    note('Cronbach\'s alpha bagian ' + a.id + ' = ' + (a.alpha === null ? '-' : f2(a.alpha)) + ' (' + svaAlphaLabel(a.alpha).toLowerCase() + ').');
+  });
+  legend(['1 Sangat tidak setuju', '2 Tidak setuju', '3 Netral', '4 Setuju', '5 Sangat setuju'], SVA_LIKERT_COLORS);
+
+  /* ================= 6. KESULITAN, JUMLAH, LEVEL ================= */
+  h1('Tingkat Kesulitan, Jumlah Soal, dan Level Bahasa');
+  para('Butir pada bagian ini memakai skala 1–5 dengan nilai tengah sebagai posisi ideal. Persentase pada kolom "Sesuai" menunjukkan responden yang memilih nilai tengah. Kolom "Bawah" dan "Atas" menunjukkan kecenderungan ke arah sisi kiri atau kanan skala.');
+  table([{ title: 'No', w: 32, align: 'center', font: 'B' }, { title: 'Aspek yang dinilai', w: 170 }, { title: 'Rerata', w: 42, align: 'center' },
+    { title: 'Bawah (1–2)', w: 54, align: 'center' }, { title: 'Sesuai (3)', w: 54, align: 'center' }, { title: 'Atas (4–5)', w: 54, align: 'center' }, { title: 'Sebaran', w: 120 }],
+    ['G1', 'G2', 'G3', 'G4'].map(function (id) {
+      var st = A.items[id];
+      return [id, st.item.text + ' (' + st.item.options[0].toLowerCase() + ' → ' + st.item.options[4].toLowerCase() + ')', f2(st.mean), svaPct(st.pctLow), svaPct(st.pctMid), svaPct(st.pctHigh),
+        { draw: function (x, yy, w, h) { dist(x, yy + h / 2 - 5, w, 10, st.dist, SVA_SEMANTIC_COLORS); }, h: 12 }];
+    }), { after: 6 });
+  legend(['1–2 sisi bawah (mis. terlalu mudah, terlalu sedikit)', '', '3 sesuai/pas', '', '4–5 sisi atas (mis. terlalu sulit, terlalu banyak)'].filter(function (x, i) { return i % 2 === 0; }),
+    [SVA_SEMANTIC_COLORS[0], SVA_SEMANTIC_COLORS[2], SVA_SEMANTIC_COLORS[4]]);
+  bullets(['G1', 'G2', 'G3', 'G4'].map(function (id) { return svaSemanticSentence(A.items[id]); }));
+  h2('G5. Jenis soal yang perlu ditambahkan');
+  countBars(A.items.G5.counts, A.n, C.violet);
+
+  /* ================= 7. PENILAIAN UMUM ================= */
+  h1('Penilaian Umum dan Rekomendasi Pengguna');
+  h2('I1. Penilaian keseluruhan terhadap DIXIGRAM');
+  para('Rerata penilaian keseluruhan adalah ' + f2(A.items.I1.mean) + ' dari 5 (' + svaPct(A.items.I1.pct) + ', kategori ' + A.items.I1.cat.label.toLowerCase() + ').', { after: 4 });
+  countBars(A.scales.overall.labels.map(function (l, i) { return { label: (i + 1) + ' – ' + l, count: A.items.I1.dist[i] }; }).reverse(), A.n, C.brand);
+  h2('I2. Net Promoter Score');
+  ensure(70);
+  var segs = [['Promotor (9–10)', A.nps.promoters, '#0f8a5f'], ['Pasif (7–8)', A.nps.passives, '#c3c9d6'], ['Detraktor (0–6)', A.nps.detractors, '#d64545']];
+  dist(M, y, W, 16, segs.map(function (s) { return s[1]; }), segs.map(function (s) { return s[2]; }));
+  y += 24;
+  legend(segs.map(function (s) { return s[0] + ': ' + s[1] + ' (' + svaPct(A.nps.n ? s[1] / A.nps.n * 100 : 0) + ')'; }), segs.map(function (s) { return s[2]; }));
+  para('NPS DIXIGRAM adalah ' + (A.nps.score > 0 ? '+' : '') + A.nps.score + ' dengan rerata skor rekomendasi ' + f2(A.nps.mean) + ' dari 10. ' +
+    (A.nps.score >= 50 ? 'Nilai di atas +50 menunjukkan kecenderungan rekomendasi yang sangat kuat.' : A.nps.score > 0 ? 'Nilai positif menunjukkan jumlah promotor lebih banyak daripada detraktor.' : 'Nilai ini menunjukkan jumlah detraktor sebanding atau lebih banyak daripada promotor.'));
+  h2('I3. Fitur yang paling bermanfaat');
+  countBars(A.items.I3.counts, A.n, C.brand2);
+
+  /* ================= 8. RELIABILITAS ================= */
+  h1('Reliabilitas Instrumen');
+  para('Konsistensi internal setiap aspek diuji dengan Cronbach\'s alpha. Nilai alpha baru stabil bila jumlah responden memadai. Untuk n kecil, nilai ini sebaiknya dibaca sebagai indikasi awal.');
+  var relRows = [['B', 'Kegunaan sistem (SUS, setelah penyesuaian arah)', '10', A.sus.alpha === null ? '-' : f2(A.sus.alpha), svaAlphaLabel(A.sus.alpha)]]
+    .concat(A.aspects.map(function (a) { return [a.id, a.aspect, String(a.k), a.alpha === null ? '-' : f2(a.alpha), svaAlphaLabel(a.alpha)]; }));
+  var relTotal = ['C–H', 'Seluruh butir respon pengguna', String(A.overall.k), A.overall.alpha === null ? '-' : f2(A.overall.alpha), svaAlphaLabel(A.overall.alpha)];
+  relTotal.bold = true; relTotal.bg = C.soft2;
+  relRows.push(relTotal);
+  table([{ title: 'Bagian', w: 50, align: 'center', font: 'B' }, { title: 'Aspek', w: 230 }, { title: 'Butir', w: 50, align: 'center' },
+    { title: 'Alpha', w: 60, align: 'center' }, { title: 'Interpretasi', w: 120 }], relRows);
+
+  /* ================= 9. KUALITAS DATA ================= */
+  h1('Kualitas Data');
+  bullets([
+    'Median waktu pengisian: ' + svaDuration(Math.round(A.quality.medianDuration)) + '.',
+    'Pengisian kurang dari 3 menit: ' + A.quality.fast.length + ' responden' + (A.quality.fast.length ? ' (' + A.quality.fast.join(', ') + ')' : '') + '.',
+    'Pola jawaban seragam pada semua pernyataan: ' + A.quality.straight.length + ' responden' + (A.quality.straight.length ? ' (' + A.quality.straight.join(', ') + ')' : '') + '.',
+    'Seluruh jawaban yang masuk lengkap pada butir wajib. Validasi ini dilakukan oleh server, dan setiap NIM hanya dapat mengisi satu kali.'
+  ]);
+  note('Responden yang ditandai tidak otomatis dikeluarkan dari analisis. Peneliti dapat menghapusnya melalui panel admin bila dinilai tidak valid, lalu mengunduh ulang laporan ini.');
+
+  /* ================= 10. TESTIMONI ================= */
+  h1('Testimoni dan Masukan');
+  var testi = A.items.I4.texts.filter(function (t) { return t.consent; });
+  para(A.items.I4.texts.length + ' responden menuliskan testimoni. ' + testi.length + ' di antaranya bersedia dikutip dan ditampilkan di bawah tanpa identitas. ' +
+    'Testimoni responden yang tidak bersedia dikutip tetap dianalisis, tetapi tidak ditampilkan.');
+  h2('Testimoni responden');
+  if (!testi.length) note('Belum ada testimoni yang boleh dikutip.');
+  testi.forEach(function (t) {
+    var lines = pdf.wrap('"' + t.text + '"', 'I', 9.2, W - 64);
+    var h = lines.length * 13 + 14;
+    ensure(h + 6);
+    pdf.rect(M, y, W, h, { fill: C.soft, r: 6 });
+    pdf.rect(M, y, 3, h, { fill: C.violet });
+    pdf.text(M + 14, y + 16, t.code, { font: 'B', size: 8, color: C.violet });
+    lines.forEach(function (l, i) { pdf.text(M + 52, y + 16 + i * 13, l, { font: 'I', size: 9.2, color: C.text }); });
+    y += h + 6;
+  });
+  [['I5', 'Kendala yang dialami responden'], ['I6', 'Saran perbaikan dari responden']].forEach(function (pair) {
+    h2(pair[0] + '. ' + pair[1] + ' (' + A.items[pair[0]].texts.length + ' jawaban)');
+    if (!A.items[pair[0]].texts.length) { note('Tidak ada jawaban.'); return; }
+    table([{ title: 'Kode', w: 50, align: 'center', font: 'B' }, { title: 'Jawaban', w: 450 }],
+      A.items[pair[0]].texts.map(function (t) { return [t.code, t.text]; }));
+  });
+
+  /* ================= 11. KESIMPULAN ================= */
+  h1('Kesimpulan dan Rekomendasi Revisi');
+  var bestAspect = A.aspects.slice().sort(function (a, b) { return b.pct - a.pct; })[0];
+  var worstAspect = A.aspects.slice().sort(function (a, b) { return a.pct - b.pct; })[0];
+  bullets([
+    'Angket diisi oleh ' + A.n + ' mahasiswa (' + svaPct(A.rate) + ' dari target ' + A.target + ').',
+    'Kegunaan sistem: skor SUS rata-rata ' + f1(A.sus.mean) + ' (grade ' + A.sus.grade + ', ' + A.sus.acceptability.toLowerCase() + ').',
+    'Respon pengguna secara keseluruhan: ' + svaPct(A.overall.pct) + ' (kategori ' + A.overall.cat.label.toLowerCase() + '). Aspek tertinggi adalah ' + bestAspect.aspect.toLowerCase() + ' (' + svaPct(bestAspect.pct) + '), sedangkan aspek terendah adalah ' + worstAspect.aspect.toLowerCase() + ' (' + svaPct(worstAspect.pct) + ').',
+    svaSemanticSentence(A.items.G1),
+    svaSemanticSentence(A.items.G3),
+    'Penilaian umum ' + f2(A.items.I1.mean) + ' dari 5, dan NPS ' + (A.nps.score > 0 ? '+' : '') + A.nps.score + '.'
+  ]);
+  h2('Prioritas revisi (tahap Evaluation)');
+  para('Butir dengan rerata terendah berikut disarankan menjadi prioritas perbaikan produk:', { after: 4 });
+  table([{ title: 'No', w: 40, align: 'center', font: 'B' }, { title: 'Pernyataan', w: 330 }, { title: 'Rerata', w: 60, align: 'center' }, { title: '%', w: 60, align: 'center' }],
+    A.lowest.slice(0, 5).map(function (st) { return [st.item.id, st.item.text, f2(st.mean), svaPct(st.pct)]; }));
+  var topTypes = A.items.G5.counts.slice().sort(function (a, b) { return b.count - a.count; }).filter(function (c) { return c.count; }).slice(0, 3);
+  var recs = [];
+  if (topTypes.length) recs.push('Jenis soal yang paling banyak diminta untuk ditambahkan: ' + topTypes.map(function (c) { return c.label + ' (' + c.count + ')'; }).join(', ') + '.');
+  if (A.items.G2.pctMid < 50) recs.push('Tinjau kembali jumlah soal per latihan karena kurang dari separuh responden menilainya "pas".');
+  if (A.items.G1.pctMid < 50) recs.push('Tinjau kembali tingkat kesulitan soal karena kurang dari separuh responden menilainya "sesuai".');
+  if (A.items.I5.texts.length) recs.push('Tindak lanjuti ' + A.items.I5.texts.length + ' catatan kendala teknis/penggunaan pada bagian Testimoni dan Masukan.');
+  recs.push('Hasil revisi dapat diuji ulang dengan instrumen yang sama untuk membandingkan skor sebelum dan sesudah revisi.');
+  h2('Rekomendasi tambahan');
+  bullets(recs);
+
+  /* ================= LAMPIRAN ================= */
+  newPage();
+  pdf.text(M, y + 14, 'Lampiran A. Instrumen Angket', { font: 'B', size: 15, color: C.ink });
+  tocEntries.push({ no: 'A', title: 'Lampiran A. Instrumen Angket', page: pdf.pageCount() });
+  y += 30;
+  A.instrument.sections.forEach(function (sec) {
+    h2('Bagian ' + sec.id + '. ' + sec.title);
+    table([{ title: 'No', w: 36, align: 'center', font: 'B' }, { title: 'Butir', w: 300 }, { title: 'Bentuk jawaban', w: 164 }],
+      sec.items.map(function (it) {
+        var form = it.type === 'likert' ? 'Likert 1–5' + (it.polarity < 0 ? ' (negatif)' : '') :
+          it.type === 'semantic' ? it.options.join(' / ') :
+          it.type === 'rating' ? '1–5 (sangat buruk – sangat baik)' :
+          it.type === 'nps' ? '0–10' :
+          it.type === 'text' ? 'Isian terbuka' + (it.required === false ? ' (opsional)' : ' (min. ' + it.min + ' karakter)') :
+          it.type === 'multi' ? 'Pilihan ganda' + (it.max && it.max < it.options.length ? ' (maks. ' + it.max + ')' : '') + ': ' + it.options.join('; ') :
+          it.options.join(' / ');
+        return [it.id, it.text, form];
+      }), { size: 8.2 });
+  });
+
+  if (opts.includeNim) {
+    newPage();
+    pdf.text(M, y + 14, 'Lampiran B. Daftar Responden', { font: 'B', size: 15, color: C.ink });
+    tocEntries.push({ no: 'B', title: 'Lampiran B. Daftar Responden', page: pdf.pageCount() });
+    y += 30;
+    note('Bersifat terbatas. Lampiran ini hanya untuk verifikasi partisipasi dan tidak untuk dipublikasikan.');
+    table([{ title: 'No', w: 34, align: 'center' }, { title: 'Kode', w: 56, align: 'center', font: 'B' }, { title: 'NIM', w: 110 }, { title: 'Waktu pengisian', w: 130 },
+      { title: 'Akses', w: 90 }, { title: 'SUS', w: 46, align: 'center' }, { title: 'Durasi', w: 60, align: 'center' }],
+      A.responses.map(function (r, i) { return [String(i + 1), r.code, r.nim, svFormatDate(r.submittedAt), r.access, r.sus === null ? '-' : f1(r.sus), svaDuration(r.durationSec)]; }), { size: 8.2 });
+  }
+
+  /* ---------- daftar isi ---------- */
+  pdf.setPage(tocPage);
+  var ty2 = tocY;
+  tocEntries.forEach(function (t) {
+    var label = (typeof t.no === 'number' ? t.no + '.  ' : '') + t.title;
+    pdf.text(M, ty2, label, { font: typeof t.no === 'number' ? 'B' : 'R', size: 10.5, color: C.ink });
+    var lw = pdf.width(label, typeof t.no === 'number' ? 'B' : 'R', 10.5);
+    pdf.line(M + lw + 6, ty2 - 2, M + W - 24, ty2 - 2, { color: '#c7cede', lw: 0.6, dash: [1, 2.5] });
+    pdf.text(M + W, ty2, String(t.page), { font: 'B', size: 10.5, color: C.brand, align: 'right' });
+    ty2 += 22;
+  });
+  ty2 += 10;
+  pdf.rect(M, ty2, W, 64, { fill: C.soft, r: 8 });
+  pdf.para(M + 14, ty2 + 12, 'Laporan ini disusun otomatis oleh panel admin DIXIGRAM dari data angket pada ' + today + '. Data mentah tersedia di sheet DIXI_Survey (Google Sheets) dan dapat diunduh dalam format CSV untuk analisis lanjutan (mis. SPSS atau Excel).',
+    W - 28, { size: 8.8, color: C.text });
+
+  /* ---------- kaki halaman ---------- */
+  var total = pdf.pageCount();
+  if (opts.watermark) {
+    for (var wp = 1; wp <= total; wp++) {
+      pdf.setPage(wp);
+      pdf.rect(0, pdf.H - 16, pdf.W, 16, { fill: '#d64545' });
+      pdf.text(pdf.W / 2, pdf.H - 5, opts.watermark, { font: 'B', size: 8, color: '#ffffff', align: 'center' });
+    }
+  }
+  for (var p = 2; p <= total; p++) {
+    pdf.setPage(p);
+    pdf.line(M, pdf.H - 38, pdf.W - M, pdf.H - 38, { color: C.line });
+    pdf.text(M, pdf.H - 24, 'DIXIGRAM · ' + (S.researcher ? S.researcher + ' · ' : '') + 'Angket respon pengguna (n = ' + A.n + ')', { size: 7.5, color: C.muted });
+    pdf.text(pdf.W - M, pdf.H - 24, 'Halaman ' + p + ' dari ' + total, { size: 7.5, color: C.muted, align: 'right' });
+  }
+  return pdf.output();
+}
+
+/** Kalimat tafsiran untuk butir skala kesesuaian (G1–G4). */
+function svaSemanticSentence(st) {
+  var it = st.item;
+  var subject = it.id === 'G1' ? 'tingkat kesulitan soal' : it.id === 'G2' ? 'jumlah soal per latihan' : it.id === 'G3' ? 'tingkat bahasa Inggris dalam materi dan soal' : 'jumlah modul';
+  var lean = st.pctLow > st.pctHigh + 5 ? ' Kecenderungan jawaban mengarah ke "' + it.options[1].toLowerCase() + '" (' + svaPct(st.pctLow) + ').'
+    : st.pctHigh > st.pctLow + 5 ? ' Kecenderungan jawaban mengarah ke "' + it.options[3].toLowerCase() + '" (' + svaPct(st.pctHigh) + ').'
+    : ' Jawaban di kedua sisi skala relatif seimbang.';
+  return svaPct(st.pctMid) + ' responden menilai ' + subject + ' "' + it.options[2].toLowerCase() + '" (rerata ' + svaFix(st.mean, 2) + ').' + lean;
+}
+</script>
