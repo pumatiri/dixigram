@@ -12,7 +12,7 @@ var DIXI_CONTENT = (function () {
     title: 'Grammar',
     label: 'Grammar Quest',
     subtitle: 'Bangun pondasi kalimat yang benar.',
-    description: 'Dari be dan present simple sampai passive voice dan reported speech. 12 modul, 3 di setiap level A1–B2.',
+    description: 'Dari be dan present simple sampai passive voice, reported speech, dan wishes. 20 modul, 5 di setiap level A1–B2.',
     icon: 'book-open',
     accent: 'violet'
   };
@@ -22,7 +22,7 @@ var DIXI_CONTENT = (function () {
     title: 'Vocabulary',
     label: 'Word Voyage',
     subtitle: 'Perkaya kata, ekspresi, dan konteks.',
-    description: 'Kata yang benar-benar dipakai sehari-hari, lengkap dengan pelafalan, arti, contoh, dan latihan konteks. 12 modul, 3 di setiap level A1–B2.',
+    description: 'Kata yang benar-benar dipakai sehari-hari, lengkap dengan pelafalan, arti, contoh, dan latihan konteks. 20 modul, 5 di setiap level A1–B2.',
     icon: 'languages',
     accent: 'teal'
   };
@@ -1688,7 +1688,7 @@ var DIXI_CONTENT = (function () {
     {
       id: 'halfway',
       title: 'Halfway Hero',
-      description: 'Tuntaskan 12 modul dari total 24 modul.',
+      description: 'Tuntaskan 12 modul dari total 40 modul.',
       icon: 'route',
       tier: 'gold',
       metric: 'completed',
@@ -1697,7 +1697,7 @@ var DIXI_CONTENT = (function () {
     {
       id: 'grammar-master',
       title: 'Grammar Master',
-      description: 'Tuntaskan seluruh 12 modul grammar.',
+      description: 'Tuntaskan 12 modul grammar.',
       icon: 'graduation',
       tier: 'gold',
       metric: 'grammarCompleted',
@@ -1706,7 +1706,7 @@ var DIXI_CONTENT = (function () {
     {
       id: 'lexicon-legend',
       title: 'Lexicon Legend',
-      description: 'Tuntaskan seluruh 12 modul vocabulary.',
+      description: 'Tuntaskan 12 modul vocabulary.',
       icon: 'crown',
       tier: 'gold',
       metric: 'vocabCompleted',
@@ -1748,6 +1748,51 @@ var DIXI_CONTENT = (function () {
       tier: 'gold',
       metric: 'balanced',
       target: 4
+    },
+    {
+      id: 'grammar-complete',
+      title: 'Grammar Grandmaster',
+      description: 'Tuntaskan seluruh 20 modul grammar.',
+      icon: 'shield',
+      tier: 'platinum',
+      metric: 'grammarCompleted',
+      target: 20
+    },
+    {
+      id: 'vocab-complete',
+      title: 'Word Wizard',
+      description: 'Tuntaskan seluruh 20 modul vocabulary.',
+      icon: 'sparkles',
+      tier: 'platinum',
+      metric: 'vocabCompleted',
+      target: 20
+    },
+    {
+      id: 'dixi-champion',
+      title: 'DIXI Champion',
+      description: 'Tuntaskan seluruh 40 modul DIXIGRAM.',
+      icon: 'trophy',
+      tier: 'platinum',
+      metric: 'completed',
+      target: 40
+    },
+    {
+      id: 'mission-runner',
+      title: 'Mission Runner',
+      description: 'Klaim 10 misi harian.',
+      icon: 'list-checks',
+      tier: 'silver',
+      metric: 'missions',
+      target: 10
+    },
+    {
+      id: 'weekly-warrior',
+      title: 'Weekly Warrior',
+      description: 'Taklukkan 3 tantangan mingguan.',
+      icon: 'swords',
+      tier: 'gold',
+      metric: 'weeklyChallenges',
+      target: 3
     }
   ];
 
@@ -1786,11 +1831,21 @@ var DIXI_MODULE_CACHE_ = null;
 function contentModules_() {
   if (DIXI_MODULE_CACHE_) return DIXI_MODULE_CACHE_;
   const extra = typeof DIXI_CONTENT_EXTRA !== 'undefined' && Array.isArray(DIXI_CONTENT_EXTRA) ? DIXI_CONTENT_EXTRA : [];
+  const extra2 = typeof DIXI_CONTENT_EXTRA2 !== 'undefined' && Array.isArray(DIXI_CONTENT_EXTRA2) ? DIXI_CONTENT_EXTRA2 : [];
+  const orderMap = {};
+  if (typeof DIXI_MODULE_ORDER !== 'undefined' && DIXI_MODULE_ORDER) {
+    Object.keys(DIXI_MODULE_ORDER).forEach(function (track) {
+      (DIXI_MODULE_ORDER[track] || []).forEach(function (id, index) { orderMap[id] = index + 1; });
+    });
+  }
   const seen = {};
-  DIXI_MODULE_CACHE_ = DIXI_CONTENT.modules.concat(extra).filter(function (m) {
+  DIXI_MODULE_CACHE_ = DIXI_CONTENT.modules.concat(extra, extra2).filter(function (m) {
     if (!m || !m.id || seen[m.id]) return false;
     seen[m.id] = true;
     return true;
+  }).map(function (m) {
+    if (orderMap[m.id]) m.order = orderMap[m.id];
+    return m;
   });
   return DIXI_MODULE_CACHE_;
 }

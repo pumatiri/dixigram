@@ -102,7 +102,7 @@ function progressBarHTML(percent, extraClass) {
    ========================================================================= */
 
 function renderLandingPage() {
-  var stats = (DIXI_STATE.boot && DIXI_STATE.boot.stats) || { modules: 24, questions: 192, words: 96, grammarModules: 12, vocabModules: 12 };
+  var stats = (DIXI_STATE.boot && DIXI_STATE.boot.stats) || { modules: 40, questions: 320, words: 160, grammarModules: 20, vocabModules: 20 };
   var word = (DIXI_STATE.boot && DIXI_STATE.boot.wordOfDay) || {
     word: 'resilient', phonetic: '/rɪˈzɪliənt/', meaning: 'tangguh, cepat pulih',
     example: 'She stayed resilient after the setback.', exampleId: 'Dia tetap tangguh setelah kemunduran itu.'
@@ -239,7 +239,7 @@ function renderLandingPage() {
             featureCard('3', 'bolt', 'XP, level, dan streak', 'Setiap jawaban benar mendorong levelmu. Jaga streak harian agar terasa seperti misi yang hidup.') +
             featureCard('4', 'chart', 'Progress yang tidak abu-abu', 'Akurasi, modul selesai, dan grafik 7 hari. Kamu tahu persis di mana kamu tumbuh.') +
             featureCard('5', 'award', 'Pencapaian yang menantang', 'Dari Perfect Run sampai Sharpshooter. Kumpulkan lencana lewat konsistensi, bukan keberuntungan.') +
-            featureCard('6', 'users', 'Papan peringkat yang sehat', 'Bandingkan total XP dengan pembelajar lain. Fokusnya tetap pada ritme belajar masing-masing.') +
+            featureCard('6', 'swords', 'Misi & peringkat mingguan', 'Selesaikan misi harian dan tantangan mingguan untuk XP bonus, lalu bersaing di papan peringkat yang mulai dari nol tiap Senin.') +
           '</div>' +
         '</div>' +
       '</section>' +
@@ -258,13 +258,28 @@ function renderLandingPage() {
       '<section class="section-pad" id="cara" style="padding-top:0;">' +
         '<div class="container">' +
           '<div class="section-head section-head--center reveal">' +
-            '<div class="eyebrow"><span class="dot"></span> Cara main</div>' +
-            '<h2>Tiga langkah, lalu <span class="text-grad">mulai.</span></h2>' +
+            '<div class="eyebrow"><span class="dot"></span> Rules of the game</div>' +
+            '<h2>Cara bermain dalam <span class="text-grad">4 langkah.</span></h2>' +
+            '<p>Singkat, jelas, dan bisa langsung dipraktikkan. Ini semua aturan yang perlu kamu tahu.</p>' +
           '</div>' +
-          '<div class="how-grid">' +
-            '<div class="how-card reveal"><div class="how-step">1</div><h3>Pilih jalur</h3><p>Mulai dari Grammar Quest atau Word Voyage. Setiap modul punya level A1–B2 dan estimasi waktu yang jelas.</p></div>' +
-            '<div class="how-card reveal"><div class="how-step">2</div><h3>Baca & jawab</h3><p>Serap materinya, lalu hadapi 6 soal acak dari bank modul. Dapatkan feedback dan penjelasan langsung.</p></div>' +
-            '<div class="how-card reveal"><div class="how-step">3</div><h3>Kumpulkan progress</h3><p>XP, level, streak, dan pencapaian tersimpan. Kembali besok untuk menjaga momentum.</p></div>' +
+          (typeof howToLandingHTML === 'function' ? howToLandingHTML() : '') +
+        '</div>' +
+      '</section>' +
+
+      '<section class="section-pad" id="misi" style="padding-top:0;">' +
+        '<div class="container">' +
+          '<div class="mq-landing reveal">' +
+            '<div class="mq-landing-copy">' +
+              '<div class="eyebrow"><span class="dot"></span> Baru di v1.5</div>' +
+              '<h2>Misi harian & <span class="text-grad">tantangan mingguan.</span></h2>' +
+              '<p>Setiap hari ada 3 misi kecil, setiap minggu ada 3 tantangan besar. Selesaikan, klaim XP bonus, dan bersaing di papan peringkat mingguan yang dimulai dari nol tiap Senin.</p>' +
+              '<div class="hero-actions"><button class="btn btn-primary" data-route="#/tantangan">' + icon('target') + ' Lihat misi hari ini</button></div>' +
+            '</div>' +
+            '<div class="mq-landing-cards" aria-hidden="true">' +
+              '<div class="mq-demo"><span class="mq-icon">' + icon('circle-check') + '</span><div><strong>Sepuluh Tepat</strong><span>Jawab benar 10 soal hari ini</span>' + progressBarHTML(70, 'progress--thin') + '</div><em>+20 XP</em></div>' +
+              '<div class="mq-demo is-ready"><span class="mq-icon">' + icon('layers') + '</span><div><strong>Dua Jalur</strong><span>Grammar + vocabulary di hari yang sama</span>' + progressBarHTML(100, 'progress--thin') + '</div><em>Klaim</em></div>' +
+              '<div class="mq-demo mq-demo--weekly"><span class="mq-icon">' + icon('swords') + '</span><div><strong>Rajin Lima Hari</strong><span>Tantangan mingguan</span>' + progressBarHTML(40, 'progress--thin') + '</div><em>+80 XP</em></div>' +
+            '</div>' +
           '</div>' +
         '</div>' +
       '</section>' +
@@ -289,7 +304,7 @@ function renderLandingPage() {
                 '<div class="showcase-stat"><span>Total XP</span><strong>1.240</strong></div>' +
                 '<div class="showcase-stat"><span>Streak</span><strong style="color:var(--coral);">7 hari</strong></div>' +
                 '<div class="showcase-stat"><span>Akurasi</span><strong>86%</strong></div>' +
-                '<div class="showcase-stat"><span>Modul</span><strong>8/12</strong></div>' +
+                '<div class="showcase-stat"><span>Modul</span><strong>18/40</strong></div>' +
               '</div>' +
               '<div class="showcase-chart" aria-hidden="true">' +
                 '<i style="height:38%"></i><i style="height:62%"></i><i style="height:46%"></i><i style="height:78%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:70%"></i>' +
@@ -369,6 +384,7 @@ function renderLandingPage() {
             (donate ? faqItem('Kalau gratis, untuk apa tombol donasi?', 'Donasi sepenuhnya sukarela untuk mendukung pengembangan materi dan perawatan aplikasi. Semua fitur sama bagi yang berdonasi maupun tidak. Tekan tombol hati (Donasi), lalu pindai kode QRIS dengan m-banking atau e-wallet apa pun.') : '') +
             faqItem('Apakah harus login dengan Google?', 'Tidak. Kamu mendaftar memakai email dan password. Password disimpan dalam bentuk hash, bukan teks asli.') +
             faqItem('Apa yang terjadi pada progress tamu?', 'Progress tamu disimpan di browser perangkat itu. Jika cache atau data browser dihapus, progress tamu ikut hilang. Buat akun agar tersimpan permanen.') +
+            faqItem('Apa itu misi harian dan tantangan mingguan?', 'Misi harian berisi 3 target kecil yang berganti setiap pukul 00.00 WIB, sedangkan tantangan mingguan berisi 3 target besar dari Senin sampai Minggu. Progresnya terisi otomatis dari latihanmu. Setelah selesai, tekan Klaim untuk mendapat XP bonus. Fitur ini tersedia untuk akun yang sudah aktif.') +
             faqItem('Bagaimana soal dipilih?', 'Setiap latihan mengambil 6 soal acak dari bank 8 soal pada modul tersebut. Jadi mengulang modul tetap memberi variasi.') +
             faqItem('Apakah bisa dimainkan di HP?', 'Bisa. Tampilan DIXIGRAM responsif, dengan navigasi bawah khusus untuk layar kecil.') +
             faqItem('Apakah saya bisa mengubah target harian dan ukuran teks?', 'Bisa. Buka Pengaturan dari menu profil atau sidebar. Pilih target 40, 80, 120, atau 160 XP, dan atur ukuran teks Normal, Besar, atau Ekstra agar nyaman dibaca di ponsel.') +
@@ -507,7 +523,8 @@ function renderDashboard() {
           (rec
             ? '<button class="btn btn-primary" data-route="#/lesson/' + rec.track + '/' + rec.id + '">' + icon('play') + ' Lanjutkan: ' + esc(rec.title) + '</button>'
             : '<button class="btn btn-primary" data-route="#/grammar">' + icon('book-open') + ' Pilih modul</button>') +
-          '<button class="btn btn-ghost" data-route="#/progress">' + icon('chart') + ' Lihat progres</button>' +
+          '<button class="btn btn-ghost" data-route="#/tantangan">' + icon('target') + ' Misi' + (missionBadgeCount() ? ' <span class="btn-badge">' + missionBadgeCount() + '</span>' : '') + '</button>' +
+          '<button class="btn btn-ghost" data-route="#/cara-bermain">' + icon('help') + ' Cara bermain</button>' +
           (guest ? '<button class="btn btn-ghost" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Full access</button>' : '') +
           (isAdmin() && adminPendingCount() ? '<button class="btn btn-ghost" data-action="admin-notif">' + icon('bell') + ' ' + adminPendingCount() + ' pendaftar menunggu</button>' : '') +
         '</div>' +
@@ -550,15 +567,7 @@ function renderDashboard() {
           '</div>' +
         '</section>' +
 
-        '<section class="panel">' +
-          '<div class="panel-head"><h2>Misi hari ini</h2><span class="chip">' + esc(todayLabel().split(',')[0]) + '</span></div>' +
-          '<div class="panel-sub">Tiga target kecil untuk menjaga ritme.</div>' +
-          '<div class="panel-body"><div class="mission-list">' +
-            missionHTML({ title: 'Panaskan mesin', sub: 'Jawab 10 soal', progress: today.answers, target: 10 }) +
-            missionHTML({ title: 'Tuntaskan satu misi', sub: 'Selesaikan 1 latihan', progress: today.quizzes, target: 1 }) +
-            missionHTML({ title: 'Tembak tepat', sub: 'Raih skor minimal 80%', progress: today.bestScore >= 80 ? 1 : 0, target: 1 }) +
-          '</div></div>' +
-        '</section>' +
+        (typeof missionsDashboardHTML === 'function' ? missionsDashboardHTML() : '') +
 
         '<section class="panel">' +
           '<div class="panel-head"><h2>Aktivitas terakhir</h2><button class="link-btn" data-route="#/progress">Detail ' + icon('arrow-right') + '</button></div>' +
@@ -1031,7 +1040,7 @@ function renderAchievementsPage() {
   var achievements = getViewAchievements();
   var unlocked = achievements.filter(function (a) { return a.unlocked; }).length;
   var profile = getViewProfile();
-  var tierOrder = { bronze: 0, silver: 1, gold: 2 };
+  var tierOrder = { bronze: 0, silver: 1, gold: 2, platinum: 3 };
   var sorted = achievements.slice().sort(function (a, b) {
     return (tierOrder[a.tier] || 0) - (tierOrder[b.tier] || 0);
   });
@@ -1094,7 +1103,13 @@ function renderLeaderboardPage() {
           '<span class="rank-streak">' + icon('flame') + data.you.streak + '</span><span class="rank-xp">' + formatNumber(data.you.xp) + ' XP</span></div></div>'
       : '') +
 
-    '<p class="access-note" style="margin-top:22px;">Peringkat dihitung dari total XP. Nama tampilan diambil dari profil akunmu.</p>' +
+    (typeof weeklyBoardHTML === 'function' && DIXI_STATE.boot && DIXI_STATE.boot.missions
+      ? '<section class="panel wk-panel"><div class="panel-head"><h2>' + icon('swords') + ' Peringkat minggu ini</h2>' +
+          '<span class="chip">' + esc(DIXI_STATE.boot.missions.weekly.label) + '</span></div>' +
+          '<div class="panel-sub">XP latihan + XP misi sejak Senin. Semua pemain mulai dari nol setiap minggu.</div>' +
+          '<div class="panel-body">' + weeklyBoardHTML(DIXI_STATE.boot.missions.leaderboard) + '</div></section>'
+      : '') +
+    '<p class="access-note" style="margin-top:22px;">Peringkat total dihitung dari seluruh XP (latihan + misi). Nama tampilan diambil dari profil akunmu.</p>' +
   '</div>';
 }
 

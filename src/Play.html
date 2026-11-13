@@ -1,0 +1,438 @@
+<script>
+'use strict';
+
+/* =========================================================================
+   DIXIGRAM — Misi, Tantangan Mingguan & Cara Bermain (v1.5)
+   File: Play.html
+   ========================================================================= */
+
+var DIXI_HOWTO_KEY = 'dixigram:howto-seen:v15';
+var DIXI_CLAIMING = {};
+
+/* -------------------------------------------------------------------------
+   DATA
+   ------------------------------------------------------------------------- */
+
+function getMissions() {
+  return (DIXI_STATE.boot && DIXI_STATE.boot.missions) || null;
+}
+
+function missionsClaimableCount() {
+  var m = getMissions();
+  return m && m.available ? (m.claimable || 0) : 0;
+}
+
+function formatCountdown(minutes) {
+  var total = Math.max(0, Math.round(Number(minutes) || 0));
+  var h = Math.floor(total / 60);
+  var m = total % 60;
+  if (h <= 0) return m + ' mnt';
+  return h + ' j ' + (m < 10 ? '0' : '') + m + ' mnt';
+}
+
+/** Dipanggil applyQuizCompletion: catat misi yang baru selesai di latihan ini. */
+function noteMissionChanges(next) {
+  var prev = getMissions();
+  var before = {};
+  if (prev && prev.available) {
+    prev.daily.missions.concat(prev.weekly.missions).forEach(function (m) {
+      if (m.completed) before[m.period + ':' + m.id] = true;
+    });
+  }
+  var fresh = [];
+  if (next && next.available) {
+    next.daily.missions.concat(next.weekly.missions).forEach(function (m) {
+      if (m.completed && !before[m.period + ':' + m.id]) fresh.push(m);
+    });
+  }
+  if (DIXI_STATE.boot) DIXI_STATE.boot.missions = next;
+  DIXI_STATE.missionsJustCompleted = fresh;
+  return fresh;
+}
+
+/* -------------------------------------------------------------------------
+   KOMPONEN MISI
+   ------------------------------------------------------------------------- */
+
+function missionCardHTML(m, options) {
+  var opts = options || {};
+  var locked = !!opts.locked;
+  var state = locked ? 'is-locked' : (m.claimed ? 'is-claimed' : (m.claimable ? 'is-claimable' : ''));
+  var valueLabel = m.value + (m.unit || '') + ' / ' + m.target + (m.unit || '');
+  var button;
+  if (locked) {
+    button = '<span class="mq-status">' + icon('lock') + ' Terkunci</span>';
+  } else if (m.claimed) {
+    button = '<span class="mq-status mq-status--done">' + icon('circle-check') + ' Diklaim</span>';
+  } else if (m.claimable) {
+    button = '<button class="btn btn-primary btn-sm mq-claim" data-action="mission-claim" data-id="' + esc(m.id) + '">' +
+      icon('gift') + ' Klaim +' + m.xp + ' XP</button>';
+  } else {
+    button = opts.compact
+      ? '<span class="mq-status">' + esc(valueLabel) + '</span>'
+      : '<span class="mq-status">' + icon('target') + ' Kurang ' + esc(String(Math.max(0, m.target - m.value)) + (m.unit || '')) + '</span>';
+  }
+  return '<article class="mq-card mq-card--' + esc(m.period) + ' ' + state + (opts.compact ? ' mq-card--compact' : '') + '">' +
+    '<span class="mq-icon">' + icon(m.claimed ? 'check' : m.icon) + '</span>' +
+    '<div class="mq-main">' +
+      '<div class="mq-top"><strong>' + esc(m.title) + '</strong><span class="mq-xp">' + icon('bolt') + '+' + m.xp + '</span></div>' +
+      '<p>' + esc(m.description) + '</p>' +
+      '<div class="mq-bar"><div class="progress progress--thin"><span class="progress-fill" style="width:' + (locked ? 0 : m.pct) + '%"></span></div>' +
+        (opts.compact ? '' : '<span>' + esc(valueLabel) + '</span>') + '</div>' +
+    '</div>' +
+    '<div class="mq-action">' + button + '</div>' +
+  '</article>';
+}
+
+function missionLockHTML(reason, inline) {
+  var pending = reason === 'pending';
+  return '<div class="mq-lock' + (inline ? ' mq-lock--inline' : '') + '">' +
+    '<span class="mq-lock-icon">' + icon(pending ? 'clock' : 'lock') + '</span>' +
+    '<div><strong>' + (pending ? 'Terbuka setelah akunmu divalidasi' : 'Khusus akun DIXIGRAM') + '</strong>' +
+      '<span>' + (pending
+        ? 'Begitu admin menyetujui akunmu, misi harian dan tantangan mingguan langsung aktif.'
+        : 'Daftar gratis untuk mengerjakan misi, mengklaim XP bonus, dan masuk peringkat mingguan.') + '</span></div>' +
+    (pending
+      ? '<button class="btn btn-ghost btn-sm" data-action="check-status">' + icon('rotate') + ' Cek status</button>'
+      : '<button class="btn btn-primary btn-sm" data-action="open-auth" data-mode="register">' + icon('sparkles') + ' Daftar gratis</button>') +
+  '</div>';
+}
+
+/** Panel ringkas di dashboard. */
+function missionsDashboardHTML() {
+  var M = getMissions();
+  if (!M) return '';
+  var locked = !M.available;
+  var claimable = locked ? 0 : M.claimable;
+  return '<section class="panel mq-panel">' +
+    '<div class="panel-head"><h2>' + icon('target') + ' Misi hari ini</h2>' +
+      (claimable ? '<span class="chip chip--success mq-pulse">' + icon('gift') + ' ' + claimable + ' siap diklaim</span>'
+        : '<span class="chip">' + icon('clock') + ' ' + esc(formatCountdown(M.daily.minutesLeft)) + '</span>') +
+    '</div>' +
+    '<div class="panel-sub">' + (locked ? 'Pratinjau misi hari ini.' : M.daily.done + ' dari ' + M.daily.missions.length + ' misi diklaim · reset pukul 00.00 WIB.') + '</div>' +
+    '<div class="panel-body">' +
+      '<div class="mq-list">' + M.daily.missions.map(function (m) { return missionCardHTML(m, { compact: true, locked: locked }); }).join('') + '</div>' +
+      (locked ? missionLockHTML(M.reason, true) : '') +
+      '<button class="mq-weekly-strip" data-route="#/tantangan">' +
+        '<span class="mq-weekly-icon">' + icon('swords') + '</span>' +
+        '<span class="mq-weekly-copy"><strong>Tantangan mingguan</strong><span>' +
+          (locked ? '3 tantangan · hadiah hingga ' + M.weekly.xpTotal + ' XP'
+            : M.weekly.done + '/' + M.weekly.missions.length + ' selesai · sisa ' + M.weekly.daysLeft + ' hari') +
+        '</span></span>' +
+        '<span class="mq-weekly-dots">' + M.weekly.missions.map(function (m) {
+          return '<i class="' + (m.claimed ? 'on' : (m.claimable ? 'ready' : '')) + '"></i>';
+        }).join('') + '</span>' +
+        icon('arrow-right') +
+      '</button>' +
+    '</div>' +
+  '</section>';
+}
+
+/** Kotak misi di halaman hasil latihan. */
+function missionResultHTML() {
+  var M = getMissions();
+  if (!M || !M.available) return '';
+  var fresh = DIXI_STATE.missionsJustCompleted || [];
+  var all = M.daily.missions.concat(M.weekly.missions);
+  var ready = all.filter(function (m) { return m.claimable; });
+  if (!fresh.length && !ready.length) {
+    var nextUp = M.daily.missions.filter(function (m) { return !m.completed; })[0];
+    if (!nextUp) return '';
+    return '<div class="mq-result mq-result--hint">' + icon('target') +
+      '<div><strong>Misi berikutnya: ' + esc(nextUp.title) + '</strong><span>' + esc(nextUp.description) + ' (' + nextUp.value + (nextUp.unit || '') + '/' + nextUp.target + (nextUp.unit || '') + ')</span></div>' +
+      '<button class="btn btn-ghost btn-sm" data-route="#/tantangan">Lihat misi</button></div>';
+  }
+  return '<div class="mq-result">' +
+    '<div class="mq-result-head">' + icon('gift') + '<strong>' + (fresh.length ? fresh.length + ' misi baru selesai!' : 'Hadiah misi menunggu') + '</strong>' +
+      '<button class="link-btn" data-route="#/tantangan">Semua misi ' + icon('arrow-right') + '</button></div>' +
+    '<div class="mq-list">' + ready.slice(0, 3).map(function (m) { return missionCardHTML(m, { compact: true }); }).join('') + '</div>' +
+  '</div>';
+}
+
+function weeklyBoardHTML(board) {
+  var b = board || { entries: [] };
+  if (!b.entries.length) {
+    return emptyStateHTML('swords', 'Belum ada skor minggu ini', 'Selesaikan satu latihan untuk membuka papan peringkat mingguan.');
+  }
+  var rows = b.entries.map(function (e) {
+    return '<div class="wk-row' + (e.isMe ? ' is-me' : '') + '">' +
+      '<span class="wk-rank wk-rank--' + (e.rank <= 3 ? e.rank : 'n') + '">' + (e.rank <= 3 ? icon(e.rank === 1 ? 'crown' : 'award') : e.rank) + '</span>' +
+      avatarHTML(e.name) +
+      '<div class="wk-name"><strong>' + esc(e.name) + (e.isMe ? ' <em>(kamu)</em>' : '') + '</strong><span>Level ' + e.level + ' · ' + e.quizzes + ' latihan</span></div>' +
+      '<span class="wk-xp">' + formatNumber(e.xp) + '<small>XP</small></span>' +
+    '</div>';
+  }).join('');
+  var you = b.you && !b.entries.some(function (e) { return e.isMe; })
+    ? '<div class="wk-you">' + (b.you.pending ? 'Akunmu belum masuk peringkat (menunggu validasi).'
+        : b.you.rank ? 'Posisimu: <strong>#' + b.you.rank + '</strong> · ' + formatNumber(b.you.xp) + ' XP minggu ini.'
+        : 'Kamu belum punya XP minggu ini. Satu latihan sudah cukup untuk masuk papan.') + '</div>'
+    : '';
+  return '<div class="wk-board">' + rows + '</div>' + you;
+}
+
+/* -------------------------------------------------------------------------
+   HALAMAN TANTANGAN
+   ------------------------------------------------------------------------- */
+
+function renderMissionsPage() {
+  var M = getMissions();
+  if (!M) return emptyStateHTML('target', 'Misi belum dimuat', 'Muat ulang data untuk melihat misi terbaru.', '<button class="btn btn-primary btn-sm" data-action="refresh-app">' + icon('rotate') + ' Muat ulang</button>');
+  var locked = !M.available;
+  var t = M.totals || { daily: 0, weekly: 0, xp: 0 };
+  var ws = M.weekly.stats || { quizzes: 0, xp: 0, days: 0 };
+
+  return '<div class="page-head mq-hero">' +
+      '<div class="mq-hero-copy">' +
+        '<div class="eyebrow"><span class="dot"></span> Tantangan & misi</div>' +
+        '<h1>Selesaikan misi, <span class="text-grad">klaim XP bonus.</span></h1>' +
+        '<p>Tiga misi harian dan tiga tantangan mingguan, sama untuk semua pemain. Progres terisi otomatis dari latihanmu.</p>' +
+        '<div class="mq-hero-chips">' +
+          '<span class="chip">' + icon('clock') + ' Misi harian reset ' + esc(formatCountdown(M.daily.minutesLeft)) + ' lagi</span>' +
+          '<span class="chip">' + icon('calendar') + ' Minggu ' + esc(M.weekly.label) + ' · sisa ' + M.weekly.daysLeft + ' hari</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="mq-hero-stats">' +
+        '<div class="mq-stat"><strong>' + (locked ? '—' : M.claimable) + '</strong><span>Siap diklaim</span></div>' +
+        '<div class="mq-stat"><strong>' + formatNumber(t.daily + t.weekly) + '</strong><span>Misi diklaim</span></div>' +
+        '<div class="mq-stat"><strong>' + formatNumber(t.xp) + '</strong><span>XP dari misi</span></div>' +
+      '</div>' +
+    '</div>' +
+    (locked ? missionLockHTML(M.reason) : '') +
+
+    '<div class="mq-layout">' +
+      '<div class="mq-col">' +
+        '<section class="panel">' +
+          '<div class="panel-head"><h2>' + icon('sun') + ' Misi harian</h2><span class="chip">' + esc(M.daily.label) + '</span></div>' +
+          '<div class="panel-sub">Hadiah hari ini: ' + M.daily.xpClaimed + ' / ' + M.daily.xpTotal + ' XP diklaim.</div>' +
+          '<div class="panel-body"><div class="mq-list">' +
+            M.daily.missions.map(function (m) { return missionCardHTML(m, { locked: locked }); }).join('') +
+          '</div></div>' +
+        '</section>' +
+        '<section class="panel">' +
+          '<div class="panel-head"><h2>' + icon('swords') + ' Tantangan mingguan</h2><span class="chip">' + esc(M.weekly.label) + '</span></div>' +
+          '<div class="panel-sub">' + (locked ? 'Hadiah total ' + M.weekly.xpTotal + ' XP.'
+            : 'Minggu ini: ' + ws.quizzes + ' latihan · ' + formatNumber(ws.xp) + ' XP latihan · aktif ' + ws.days + ' hari.') + '</div>' +
+          '<div class="panel-body"><div class="mq-list">' +
+            M.weekly.missions.map(function (m) { return missionCardHTML(m, { locked: locked }); }).join('') +
+          '</div></div>' +
+        '</section>' +
+      '</div>' +
+      '<div class="mq-col mq-col--side">' +
+        '<section class="panel">' +
+          '<div class="panel-head"><h2>' + icon('trophy') + ' Peringkat minggu ini</h2></div>' +
+          '<div class="panel-sub">XP latihan + XP misi sejak Senin. Papan dimulai dari nol setiap minggu.</div>' +
+          '<div class="panel-body">' + weeklyBoardHTML(M.leaderboard) + '</div>' +
+        '</section>' +
+        '<section class="panel mq-rules">' +
+          '<div class="panel-head"><h2>' + icon('info') + ' Aturan misi</h2></div>' +
+          '<div class="panel-body"><ul class="ht-rule-list ht-rule-list--sm">' +
+            '<li>' + icon('rotate') + '<span>Misi harian berganti setiap pukul 00.00 WIB. Tantangan mingguan berjalan Senin–Minggu.</span></li>' +
+            '<li>' + icon('gift') + '<span>Misi yang selesai harus <b>diklaim</b> sebelum periodenya berakhir agar XP masuk.</span></li>' +
+            '<li>' + icon('bolt') + '<span>XP misi menambah total XP dan level, tetapi tidak dihitung ke target harian.</span></li>' +
+            '<li>' + icon('award') + '<span>Klaim 10 misi harian dan 3 tantangan mingguan untuk membuka lencana khusus.</span></li>' +
+          '</ul>' +
+          '<button class="btn btn-ghost btn-sm" data-route="#/cara-bermain">' + icon('help') + ' Cara bermain lengkap</button></div>' +
+        '</section>' +
+      '</div>' +
+    '</div>';
+}
+
+/* -------------------------------------------------------------------------
+   KLAIM
+   ------------------------------------------------------------------------- */
+
+function claimMission(id, button) {
+  if (!id || DIXI_CLAIMING[id]) return;
+  DIXI_CLAIMING[id] = true;
+  if (button) setButtonLoading(button, true, 'Mengklaim…');
+  var before = {};
+  getViewAchievements().forEach(function (a) { if (a.unlocked) before[a.id] = true; });
+
+  apiCall('apiClaimMission', DIXI_STATE.token, id)
+    .then(function (res) {
+      delete DIXI_CLAIMING[id];
+      if (DIXI_STATE.boot) {
+        DIXI_STATE.boot.profile = res.profile;
+        DIXI_STATE.boot.progress = res.progress;
+        DIXI_STATE.boot.achievements = res.achievements;
+        DIXI_STATE.boot.leaderboard = res.leaderboard;
+        DIXI_STATE.boot.missions = res.missions;
+        syncCatalogFromProgress(res.progress);
+      }
+      DIXI_STATE.missionsJustCompleted = (DIXI_STATE.missionsJustCompleted || []).filter(function (m) { return m.id !== id; });
+      var y = window.scrollY;
+      if (DIXI_STATE.route.name === 'quiz') { if (typeof renderQuizRoute === 'function') renderQuizRoute(); }
+      else renderRoute();
+      window.scrollTo(0, y);
+      toast('+' + res.claimed.xp + ' XP', (res.claimed.period === 'weekly' ? 'Tantangan mingguan' : 'Misi') + ' “' + res.claimed.title + '” diklaim.', 'success', 3600);
+      launchConfetti({ count: res.claimed.period === 'weekly' ? 110 : 60 });
+      var fresh = res.achievements.filter(function (a) { return a.unlocked && !before[a.id]; });
+      if (fresh.length) {
+        setTimeout(function () {
+          toast('Pencapaian baru', fresh.map(function (a) { return a.title; }).join(', '), 'success', 6500);
+        }, 700);
+      }
+    })
+    .catch(function (err) {
+      delete DIXI_CLAIMING[id];
+      if (button && document.body.contains(button)) setButtonLoading(button, false);
+      toast('Klaim gagal', err.message || 'Coba lagi sebentar lagi.', 'error');
+      if (err.code === 'NOT_FOUND' || err.code === 'ALREADY_CLAIMED') refreshBoot(true);
+    });
+}
+
+/* -------------------------------------------------------------------------
+   CARA BERMAIN
+   ------------------------------------------------------------------------- */
+
+function howToStepsHTML() {
+  var cfg = getConfig();
+  var steps = [
+    { icon: 'compass', title: 'Pilih modul', text: 'Buka Grammar atau Vocabulary, lalu pilih modul sesuai levelmu (A1 → B2).' },
+    { icon: 'book-open', title: 'Baca materi', text: 'Pelajari rumus, contoh, dan tips. Di modul vocabulary ada flashcard untuk menghafal.' },
+    { icon: 'play', title: 'Jawab ' + (cfg.quizSize || 6) + ' soal', text: 'Pilih jawaban atau ketik isian, tekan Periksa, lalu baca penjelasannya.' },
+    { icon: 'gift', title: 'Kumpulkan & klaim', text: 'Dapatkan XP, jaga streak, lalu klaim hadiah misi harian dan mingguan.' }
+  ];
+  return '<ol class="ht-steps">' + steps.map(function (s, i) {
+    return '<li class="ht-step"><span class="ht-step-num">' + (i + 1) + '</span>' +
+      '<span class="ht-step-icon">' + icon(s.icon) + '</span>' +
+      '<strong>' + esc(s.title) + '</strong><p>' + esc(s.text) + '</p></li>';
+  }).join('') + '</ol>';
+}
+
+function howToRulesHTML() {
+  var cfg = getConfig();
+  var size = cfg.quizSize || 6;
+  var pass = cfg.passScore || 60;
+  var rep = Math.round(((cfg.xp && cfg.xp.repeatMultiplier) || 0.3) * 100);
+  var rules = [
+    ['layers', 'Soal acak', size + ' soal diambil acak dari bank 8 soal tiap modul, jadi mengulang tetap seru.'],
+    ['clock', 'Tanpa batas waktu', 'Jawab dengan tenang. Yang dinilai ketepatan, bukan kecepatan.'],
+    ['flag', 'Lulus ≥ ' + pass + '%', 'Skor minimal ' + pass + '% membuat modul berstatus tuntas.'],
+    ['pen-line', 'Soal isian', 'Ejaan harus tepat. Huruf besar/kecil dan spasi berlebih tidak berpengaruh.'],
+    ['rotate', 'Latihan ulang', 'Mengulang modul yang sama di hari yang sama memberi ' + rep + '% XP.'],
+    ['flame', 'Streak', 'Selesaikan minimal 1 latihan setiap hari agar streak tidak putus.']
+  ];
+  return '<ul class="ht-rule-list">' + rules.map(function (r) {
+    return '<li>' + icon(r[0]) + '<span><b>' + esc(r[1]) + '.</b> ' + esc(r[2]) + '</span></li>';
+  }).join('') + '</ul>';
+}
+
+function howToXpTableHTML() {
+  var cfg = getConfig();
+  var xp = cfg.xp || { correct: 10, complete: 20, perfect: 30, levelXp: 200 };
+  var rows = [
+    ['circle-check', 'Setiap jawaban benar', '+' + xp.correct + ' XP'],
+    ['flag', 'Menyelesaikan latihan', '+' + xp.complete + ' XP'],
+    ['sparkles', 'Skor sempurna 100%', '+' + xp.perfect + ' XP'],
+    ['target', 'Misi harian (3 per hari)', '+15–25 XP'],
+    ['swords', 'Tantangan mingguan (3 per minggu)', '+60–80 XP'],
+    ['trending-up', 'Naik level', 'setiap ' + xp.levelXp + ' XP']
+  ];
+  return '<div class="ht-xp">' + rows.map(function (r) {
+    return '<div class="ht-xp-row">' + icon(r[0]) + '<span>' + esc(r[1]) + '</span><strong>' + esc(r[2]) + '</strong></div>';
+  }).join('') +
+  '<div class="ht-xp-note">' + icon('lightbulb') + ' Contoh: 6 benar + selesai + sempurna = ' + (6 * xp.correct + xp.complete + xp.perfect) + ' XP dalam satu latihan.</div></div>';
+}
+
+function renderHowToPlayPage() {
+  var cfg = getConfig();
+  var stats = (DIXI_STATE.boot && DIXI_STATE.boot.stats) || { modules: 40, questions: 320, words: 160 };
+  var guestLimit = (cfg.guest && cfg.guest.quizLimit) || 2;
+  return '<div class="page-head ht-hero">' +
+      '<div class="eyebrow"><span class="dot"></span> Rules of the game</div>' +
+      '<h1>Cara bermain <span class="text-grad">DIXIGRAM</span></h1>' +
+      '<p>Cukup 5–10 menit sehari. Baca materi singkat, jawab ' + (cfg.quizSize || 6) + ' soal, kumpulkan XP, dan naik level. Ini aturan mainnya.</p>' +
+    '</div>' +
+    '<section class="panel ht-panel"><div class="panel-head"><h2>' + icon('route') + ' 4 langkah bermain</h2></div>' +
+      '<div class="panel-body">' + howToStepsHTML() + '</div></section>' +
+    '<div class="ht-grid">' +
+      '<section class="panel"><div class="panel-head"><h2>' + icon('list-checks') + ' Aturan latihan</h2></div>' +
+        '<div class="panel-body">' + howToRulesHTML() + '</div></section>' +
+      '<section class="panel"><div class="panel-head"><h2>' + icon('bolt') + ' Cara mendapat XP</h2></div>' +
+        '<div class="panel-body">' + howToXpTableHTML() + '</div></section>' +
+    '</div>' +
+    '<div class="ht-grid">' +
+      '<section class="panel"><div class="panel-head"><h2>' + icon('target') + ' Misi & peringkat</h2></div>' +
+        '<div class="panel-body"><ul class="ht-rule-list">' +
+          '<li>' + icon('sun') + '<span><b>Misi harian.</b> 3 target kecil yang berganti tiap hari, misalnya “jawab benar 10 soal”.</span></li>' +
+          '<li>' + icon('swords') + '<span><b>Tantangan mingguan.</b> 3 target besar Senin–Minggu dengan hadiah XP lebih besar.</span></li>' +
+          '<li>' + icon('gift') + '<span><b>Klaim hadiah.</b> Tekan tombol Klaim saat misi selesai, sebelum periodenya habis.</span></li>' +
+          '<li>' + icon('trophy') + '<span><b>Dua papan peringkat.</b> Peringkat total (semua XP) dan peringkat mingguan yang mulai dari nol tiap Senin.</span></li>' +
+        '</ul></div></section>' +
+      '<section class="panel"><div class="panel-head"><h2>' + icon('user') + ' Tamu vs akun</h2></div>' +
+        '<div class="panel-body"><ul class="ht-rule-list">' +
+          '<li>' + icon('compass') + '<span><b>Tamu.</b> 4 modul gratis, ' + guestLimit + ' latihan per hari, progress hanya di perangkat ini.</span></li>' +
+          '<li>' + icon('sparkles') + '<span><b>Akun gratis.</b> ' + stats.modules + ' modul, ' + stats.questions + ' soal, latihan tanpa batas, misi, lencana, dan peringkat.</span></li>' +
+          '<li>' + icon('shield') + '<span><b>Validasi.</b> Akun baru aktif penuh setelah disetujui admin. Sambil menunggu, modul gratis tetap bisa dimainkan.</span></li>' +
+          '<li>' + icon('lock') + '<span><b>Satu perangkat.</b> Satu akun hanya bisa aktif di satu perangkat pada waktu yang sama.</span></li>' +
+        '</ul></div></section>' +
+    '</div>' +
+    '<section class="panel ht-tips"><div class="panel-head"><h2>' + icon('lightbulb') + ' Tips cepat naik level</h2></div>' +
+      '<div class="panel-body"><div class="ht-tip-grid">' +
+        '<div class="ht-tip">' + icon('book-open') + '<span>Baca materi dulu, baru latihan. Jebakan umum biasanya ada di bagian tips.</span></div>' +
+        '<div class="ht-tip">' + icon('rotate') + '<span>Ulangi modul dengan skor rendah besok hari untuk XP penuh.</span></div>' +
+        '<div class="ht-tip">' + icon('layers') + '<span>Selang-seling grammar dan vocabulary untuk menyelesaikan misi “Dua Jalur”.</span></div>' +
+        '<div class="ht-tip">' + icon('calendar') + '<span>Bermain sedikit tapi setiap hari lebih efektif daripada banyak sekaligus.</span></div>' +
+      '</div>' +
+      '<div class="hero-actions" style="margin-top:16px;">' +
+        '<button class="btn btn-primary" data-route="#/grammar">' + icon('play') + ' Mulai latihan</button>' +
+        '<button class="btn btn-ghost" data-route="#/tantangan">' + icon('target') + ' Lihat misi</button>' +
+      '</div></div></section>';
+}
+
+/** Bagian ringkas di landing page (menggantikan "Cara main" lama). */
+function howToLandingHTML() {
+  return '<div class="ht-landing">' +
+    howToStepsHTML() +
+    '<div class="ht-landing-grid reveal">' +
+      '<div class="ht-landing-card"><h3>' + icon('list-checks') + ' Aturan singkat</h3>' + howToRulesHTML() + '</div>' +
+      '<div class="ht-landing-card"><h3>' + icon('bolt') + ' Hadiah XP</h3>' + howToXpTableHTML() + '</div>' +
+    '</div>' +
+    '<div class="hero-actions" style="justify-content:center;margin-top:18px;">' +
+      '<button class="btn btn-ghost" data-route="#/cara-bermain">' + icon('help') + ' Panduan lengkap</button>' +
+    '</div>' +
+  '</div>';
+}
+
+/** Jendela panduan singkat: muncul sekali di tiap perangkat. */
+function openHowToModal() {
+  openModal({
+    cardClass: 'modal-card--howto',
+    title: 'Selamat datang di DIXIGRAM!',
+    subtitle: 'Begini cara bermainnya — cukup 30 detik dibaca.',
+    body: howToStepsHTML() +
+      '<div class="ht-modal-rules">' +
+        '<span>' + icon('layers') + ' ' + (getConfig().quizSize || 6) + ' soal acak</span>' +
+        '<span>' + icon('flag') + ' Lulus ≥ ' + (getConfig().passScore || 60) + '%</span>' +
+        '<span>' + icon('clock') + ' Tanpa batas waktu</span>' +
+        '<span>' + icon('gift') + ' Klaim XP misi</span>' +
+      '</div>',
+    actions:
+      '<button class="btn btn-ghost" data-action="howto-full">' + icon('help') + ' Panduan lengkap</button>' +
+      '<button class="btn btn-primary" data-action="close-modal" autofocus>' + icon('play') + ' Ayo mulai</button>'
+  });
+}
+
+function maybeShowHowTo() {
+  var route = DIXI_STATE.route && DIXI_STATE.route.name;
+  if (!route || ['landing', 'quiz', 'admin', 'angket', 'cara-bermain'].indexOf(route) !== -1) return;
+  if (DIXI_STATE.modal || isAdmin()) return;
+  var seen = '';
+  try { seen = localStorage.getItem(DIXI_HOWTO_KEY) || ''; } catch (err) { seen = '1'; }
+  if (seen) return;
+  try { localStorage.setItem(DIXI_HOWTO_KEY, '1'); } catch (err) { /* abaikan */ }
+  setTimeout(function () { if (!DIXI_STATE.modal) openHowToModal(); }, 450);
+}
+
+/* -------------------------------------------------------------------------
+   AKSI
+   ------------------------------------------------------------------------- */
+
+function handlePlayAction(action, el) {
+  if (action === 'mission-claim') { claimMission(el.getAttribute('data-id'), el); return true; }
+  if (action === 'howto-open') { closeUserMenu(); openHowToModal(); return true; }
+  if (action === 'howto-full') { closeModal(); navigateTo('#/cara-bermain'); return true; }
+  return false;
+}
+</script>

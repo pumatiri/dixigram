@@ -595,9 +595,11 @@ function deleteUserLearningData_(email) {
   if (keptActivity.length !== activity.length) {
     rewriteTable_(DIXI.SHEETS.ACTIVITY, DB_HEADERS.ACTIVITY.length, keptActivity);
   }
+  const missions = typeof deleteUserMissionData_ === 'function' ? deleteUserMissionData_(email) : 0;
   return {
     progress: progress.length - keptProgress.length,
-    activity: activity.length - keptActivity.length
+    activity: activity.length - keptActivity.length,
+    missions: missions
   };
 }
 

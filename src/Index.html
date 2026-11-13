@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="id" data-theme="dark" data-text="md">
+<html lang="id" data-theme="dark" data-text="md" data-glass="full">
 <head>
   <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="description" content="DIXIGRAM — game belajar grammar dan vocabulary dengan materi, latihan, XP, level, streak, dan progress.">
-  <meta name="theme-color" content="#080b14">
+  <meta name="theme-color" content="#0b0d24">
   <meta name="application-name" content="DIXIGRAM">
   <meta name="color-scheme" content="dark light">
   <title>DIXIGRAM — Grammar &amp; Vocabulary Game</title>
@@ -22,6 +22,16 @@
         document.documentElement.setAttribute('data-theme', theme);
         var size = localStorage.getItem('dixigram:text-size');
         document.documentElement.setAttribute('data-text', size === 'lg' || size === 'xl' ? size : 'md');
+        // v1.5: efek kaca. Otomatis "ringan" untuk perangkat bermemori kecil
+        // atau bila pengguna meminta transparansi dikurangi.
+        var glass = localStorage.getItem('dixigram:glass');
+        if (glass !== 'full' && glass !== 'lite') {
+          var lowMem = navigator.deviceMemory && navigator.deviceMemory <= 2;
+          var lessGlass = window.matchMedia && window.matchMedia('(prefers-reduced-transparency: reduce)').matches;
+          var noBlur = !(window.CSS && CSS.supports && (CSS.supports('backdrop-filter', 'blur(2px)') || CSS.supports('-webkit-backdrop-filter', 'blur(2px)')));
+          glass = lowMem || lessGlass || noBlur ? 'lite' : 'full';
+        }
+        document.documentElement.setAttribute('data-glass', glass);
       } catch (err) {
         document.documentElement.setAttribute('data-theme', 'dark');
         document.documentElement.setAttribute('data-text', 'md');
@@ -55,6 +65,7 @@
 
   <?!= include('App'); ?>
   <?!= include('Views'); ?>
+  <?!= include('Play'); ?>
   <?!= include('QuizUI'); ?>
   <?!= include('AdminUI'); ?>
   <?!= include('Pdf'); ?>

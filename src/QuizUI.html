@@ -625,6 +625,7 @@ function renderQuizResult() {
         : 'Progress tersimpan di akunmu · ' + (r.repeat ? 'XP latihan ulang dibatasi ' + repeatPct + '%.' : 'XP penuh untuk modul ini hari ini.') +
           (isPending() ? ' Tampil di peringkat setelah akun divalidasi.' : '')) + '</div>' +
       guestUpsell +
+      (typeof missionResultHTML === 'function' ? missionResultHTML() : '') +
       (typeof surveyResultPromptHTML === 'function' ? surveyResultPromptHTML() : '') +
     '</div>' +
 

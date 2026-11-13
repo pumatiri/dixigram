@@ -35,7 +35,7 @@ const SURVEY_SCALES = Object.freeze({
 });
 
 const SURVEY_INSTRUMENT = Object.freeze({
-  version: '1.0',
+  version: '1.1',
   title: 'Angket Respon Pengguna DIXIGRAM',
   sections: [
     {
@@ -128,7 +128,7 @@ const SURVEY_INSTRUMENT = Object.freeze({
           options: ['Terlalu sedikit', 'Agak sedikit', 'Pas', 'Agak banyak', 'Terlalu banyak'] },
         { id: 'G3', type: 'semantic', text: 'Tingkat bahasa Inggris dalam materi dan soal dibandingkan kemampuan saya',
           options: ['Terlalu rendah', 'Agak rendah', 'Sesuai', 'Agak tinggi', 'Terlalu tinggi'] },
-        { id: 'G4', type: 'semantic', text: 'Jumlah modul yang tersedia (24 modul)',
+        { id: 'G4', type: 'semantic', text: 'Jumlah modul yang tersedia (40 modul)',
           options: ['Sangat kurang', 'Kurang', 'Cukup', 'Banyak', 'Sangat banyak'] },
         { id: 'G5', type: 'multi', required: false, max: 7, text: 'Jenis soal yang perlu ditambahkan (boleh lebih dari satu)',
           options: ['Mendengarkan (listening)', 'Menyusun kata menjadi kalimat', 'Mencocokkan (matching)',

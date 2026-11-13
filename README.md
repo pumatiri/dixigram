@@ -1,7 +1,7 @@
 <p align="center"><img src="docs/assets/logo-192.png" width="96" alt="DIXIGRAM"></p>
 
 <h1 align="center">DIXIGRAM</h1>
-<p align="center">Game belajar grammar &amp; vocabulary bahasa Inggris — 24 modul level A1–B2, XP, streak, peringkat, dan panel admin.<br>
+<p align="center">Game belajar grammar &amp; vocabulary bahasa Inggris — 40 modul level A1–B2, misi harian, tantangan mingguan, XP, streak, peringkat, dan panel admin.<br>
 Backend: Google Apps Script + Google Sheets · Frontend: HtmlService</p>
 
 ---
@@ -12,9 +12,9 @@ Backend: Google Apps Script + Google Sheets · Frontend: HtmlService</p>
 src/                     Kode Apps Script (yang di-push ke script.google.com)
   appsscript.json
   Code.gs  Auth.gs  Database.gs  Admin.gs  Progress.gs  Quiz.gs
-  Content.gs  Content2.gs  Donation.gs  Survey.gs
+  Content.gs  Content2.gs  Content3.gs  Missions.gs  Donation.gs  Survey.gs
   Index.html  App.html  Views.html  QuizUI.html  AdminUI.html  Styles.html  Icons.html
-  Pdf.html  SurveyUI.html  SurveyAdmin.html
+  Play.html  Pdf.html  SurveyUI.html  SurveyAdmin.html
 docs/                    Situs GitHub Pages (pembungkus Web App + ikon)
   index.html  manifest.webmanifest  assets/
 .github/workflows/       Deploy otomatis ke Apps Script (opsional)
@@ -76,14 +76,18 @@ Persiapan sekali saja:
 > Jangan pernah meng-commit `.clasprc.json` atau `.clasp.json` (sudah ada di `.gitignore`).
 > Bila workflow gagal dengan pesan login/izin, ulangi `clasp login` dan perbarui secret `CLASPRC_JSON`.
 
-## Fitur utama (v1.4)
+## Fitur utama (v1.5)
 
-- 24 modul: 12 grammar + 12 vocabulary, 3 modul di setiap level A1, A2, B1, B2 · 192 soal · 96 kata
+- 40 modul: 20 grammar + 20 vocabulary, 5 modul di setiap level A1, A2, B1, B2 · 320 soal · 160 kata
+- **Desain glassmorphism** (tema gelap & terang) dengan pilihan **Efek kaca: Penuh / Ringan** di Pengaturan
+- **Misi harian** (3 per hari) dan **tantangan mingguan** (3 per minggu) berhadiah XP, plus **peringkat mingguan**.
+  Klaim tercatat di sheet `DIXI_Missions` (dibuat oleh `setupDixigram`).
+- Halaman **Cara bermain** (rules of the game) dan panduan singkat saat pertama kali membuka aplikasi
 - Mode kartu: kosakata (kata → arti) dan grammar (rumus, terjemahan, ubah kalimat)
 - Validasi pendaftar oleh admin + lonceng notifikasi pendaftar baru
 - **Single login**: akun non-admin hanya aktif di satu perangkat/browser; login kedua ditolak selama sesi lama aktif
   (aktif = ada aktivitas dalam 10 menit terakhir). Admin bisa mengeluarkan sesi yang "nyangkut".
-- Mode ringan: animasi dekoratif dan efek blur dimatikan agar cepat di ponsel
+- Animasi dekoratif dimatikan agar ringan di ponsel; mode kaca Ringan otomatis untuk perangkat bermemori kecil
 - **Angket penelitian (R&D model ADDIE):** terbuka setelah minimal satu latihan selesai, termasuk untuk tamu. Responden cukup mengisi NIM.
   Instrumen berisi 56 butir (SUS + Likert). Admin bisa mengunduh laporan PDF resmi dan data CSV.
 - Istilah kata kerja: V‑base, V‑past, V‑past participle

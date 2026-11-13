@@ -242,7 +242,8 @@ function finishQuiz_(token, attemptId) {
         achievements: achievements,
         quota: quotaUsage_(session),
         isGuest: false,
-        surveyTicket: createSurveyTicket_()
+        surveyTicket: createSurveyTicket_(),
+        missions: buildMissions_(Object.assign({}, session, { user: updatedUser }))
       };
       attempt.finished = true;
       attempt.finishedResult = payloadUser;

@@ -1,27 +1,55 @@
-# DIXIGRAM v1.4.0 — Panduan Update
+# DIXIGRAM v1.5.0 — Panduan Update
 
-Paket ini sudah mencakup semua revisi sebelumnya (v1.2 sampai v1.3), jadi cukup pasang paket ini saja.
+Paket ini sudah mencakup semua revisi sebelumnya (v1.2 sampai v1.4.1), jadi cukup pasang paket ini saja.
 
 ## Cara memasang
 
 1. Buka proyek di editor Apps Script.
 2. **Tambah file baru** (bila belum ada). Pilih `+` → Script untuk file `.gs`, atau `+` → HTML untuk file `.html`, lalu tempel isinya:
-   - `Content2` ← `Content2.gs`
-   - `Donation` ← `Donation.gs`
-   - `Survey` (Script) ← `Survey.gs` **(baru)**
-   - `Pdf` (HTML) ← `Pdf.html` **(baru)**
-   - `SurveyUI` (HTML) ← `SurveyUI.html` **(baru)**
-   - `SurveyAdmin` (HTML) ← `SurveyAdmin.html` **(baru)**
+   - `Content3` (Script) ← `Content3.gs` **(baru v1.5)**
+   - `Missions` (Script) ← `Missions.gs` **(baru v1.5)**
+   - `Play` (HTML) ← `Play.html` **(baru v1.5)**
+   - `Content2`, `Donation`, `Survey` (Script) dan `Pdf`, `SurveyUI`, `SurveyAdmin` (HTML), bila belum ada dari versi sebelumnya.
 3. **Ganti isi semua file lain** dengan versi di paket ini:
-   `Code.gs`, `Auth.gs`, `Database.gs`, `Admin.gs`, `Progress.gs`, `Quiz.gs`, `Content.gs`,
+   `Code.gs`, `Auth.gs`, `Database.gs`, `Admin.gs`, `Progress.gs`, `Quiz.gs`, `Content.gs`, `Content2.gs`, `Survey.gs`,
    `Index.html`, `App.html`, `Views.html`, `QuizUI.html`, `AdminUI.html`, `Styles.html`, `Icons.html`, `appsscript.json`.
 4. Isi lagi email admin Anda di `ADMIN_EMAILS` (`Code.gs`).
-5. Jalankan `setupDixigram` sekali dari editor.
+5. Jalankan `setupDixigram` sekali dari editor. Fungsi ini membuat sheet baru **`DIXI_Missions`** (catatan klaim misi). Data lama tidak berubah.
 6. **Deploy → Kelola deployment → ✏️ → Versi: Versi baru → Deploy.** URL `/exec` tetap sama.
-7. Di repositori GitHub, unggah isi paket `DIXIGRAM-v1.4.0-github.zip`.
-8. Buka **Admin → Angket → Pengaturan angket**, lalu isi **Institusi / program studi** dan periksa judul penelitian. Nilai ini tampil di halaman pengantar angket dan sampul laporan.
+7. Di repositori GitHub, unggah isi paket `DIXIGRAM-v1.5.0-github.zip`.
 
-## Baru di v1.4.0 — Angket penelitian (R&D model ADDIE)
+## Baru di v1.5.0
+
+| No | Permintaan | Hasil |
+|---|---|---|
+| 1 | Desain glassmorphism | Seluruh tampilan memakai permukaan kaca buram di atas latar gradasi berwarna (ungu–biru–cyan–merah muda), tombol gradasi mengkilap, dan navigasi bawah mengambang di ponsel. Tersedia di tema gelap dan terang. Di **Pengaturan → Efek kaca** pengguna bisa memilih **Penuh** atau **Ringan** (panel padat tanpa blur, hemat baterai). Ponsel bermemori kecil otomatis memakai mode Ringan. |
+| 2 | Tambah soal di setiap level | Tiap level A1–B2 mendapat **2 modul grammar + 2 modul vocabulary** baru. Total kini **40 modul** (5 grammar + 5 vocabulary per level), **320 soal**, dan **160 kata inti**. Rinciannya ada di tabel berikut. |
+| 3 | Tantangan mingguan & misi | **3 misi harian** (berganti pukul 00.00 WIB) dan **3 tantangan mingguan** (Senin–Minggu) dengan hadiah 15–25 XP dan 60–80 XP. Progres terisi otomatis dari latihan; tekan **Klaim** untuk mengambil XP. Halaman baru **Misi & tantangan** berisi daftar misi, **peringkat mingguan** (mulai dari nol tiap Senin), dan aturan misi. Misi juga muncul di dashboard dan di halaman hasil latihan. Ada 5 lencana baru. |
+| 4 | Rules of the game | Halaman baru **Cara bermain** (4 langkah, aturan latihan, tabel XP, misi & peringkat, tamu vs akun, tips). Panduan singkat muncul otomatis sekali saat pertama kali membuka aplikasi, dan bagian "Cara main" di halaman depan diperbarui. |
+| 5 | Penyesuaian lain | Menu **Misi** menggantikan **Progres** di navigasi bawah ponsel (Progres tetap ada di menu profil). Halaman Peringkat mendapat papan mingguan. Teks butir G4 angket diperbarui menjadi "(40 modul)" dan versi instrumen menjadi 1.1. Avatar di jendela Pengaturan kini rata tengah. |
+
+### 16 modul baru
+
+| Level | Grammar | Vocabulary |
+|---|---|---|
+| A1 | Articles & Plurals · Prepositions of Time & Place | Clothes & Colours · Weather & Seasons |
+| A2 | Quantifiers · Past Continuous | Hobbies & Free Time · City & Directions |
+| B1 | Gerunds & Infinitives · Past Perfect | Education & Campus Life · Everyday Phrasal Verbs |
+| B2 | Modals of Deduction · Wishes & Regrets | Business & Economy · Science & Research |
+
+Setiap modul baru punya materi (rumus, tabel, contoh dua bahasa, tips), 8 soal di bank latihan (pilihan ganda dan isian), dan untuk vocabulary 8 kata lengkap dengan pelafalan, contoh, dan kolokasi. Urutan modul di katalog disusun ulang per level (A1 → B2).
+
+### Catatan untuk penelitian
+
+- Lencana lama tetap terbuka bagi yang sudah mendapatkannya (target tidak dinaikkan). Lencana baru: Grammar Grandmaster, Word Wizard, DIXI Champion, Mission Runner, Weekly Warrior.
+- XP misi menambah total XP dan level, tetapi tidak dihitung ke target harian.
+- Respons angket lama tetap tersimpan. Respons baru tercatat dengan versi instrumen 1.1 (kolom `Versi` di sheet `DIXI_Survey`), sehingga bisa dibedakan bila perlu.
+
+## Riwayat v1.4.1
+
+- Panel admin → Ringkasan: kartu pendaftar di kolom "Menunggu validasi" tidak lagi menyempit menjadi satu huruf per baris di layar komputer. Kartu kini menyesuaikan lebar kolomnya. File yang berubah: `Styles.html` dan `Code.gs` (nomor versi).
+
+## Riwayat v1.4.0 — Angket penelitian (R&D model ADDIE)
 
 ### Untuk responden (mahasiswa)
 - **Tempat angket:** bagian **Angket penelitian** muncul di bagian bawah halaman depan dan di bawah setiap halaman aplikasi. Bagian ini juga ada di menu samping dan sebagai ajakan di halaman hasil latihan.

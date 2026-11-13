@@ -802,6 +802,8 @@ function applyQuizCompletion(payload) {
   getViewAchievements().forEach(function (a) { if (a.unlocked) before[a.id] = true; });
 
   if (payload.quota) setQuota(payload.quota);
+  DIXI_STATE.missionsJustCompleted = [];
+  if (payload.missions && typeof noteMissionChanges === 'function') noteMissionChanges(payload.missions);
   if (payload.isGuest) {
     recordGuestResult(payload.result);
   } else {
@@ -1093,7 +1095,7 @@ function routeFromLocation() {
     }
     return { name: 'admin', params: { tab: decodeURIComponent(parts[1] || '') } };
   }
-  if (['dashboard', 'grammar', 'vocabulary', 'progress', 'achievements', 'leaderboard', 'landing', 'angket'].indexOf(name) !== -1) {
+  if (['dashboard', 'grammar', 'vocabulary', 'progress', 'achievements', 'leaderboard', 'landing', 'angket', 'tantangan', 'cara-bermain'].indexOf(name) !== -1) {
     return { name: name, params: {} };
   }
   return { name: 'dashboard', params: {} };
@@ -1173,6 +1175,7 @@ function renderRoute() {
   if (route.name === 'admin' && typeof ensureAdminLoaded === 'function') {
     ensureAdminLoaded();
   }
+  if (typeof maybeShowHowTo === 'function') maybeShowHowTo();
 }
 
 function pageTitle(name) {
@@ -1185,7 +1188,9 @@ function pageTitle(name) {
     leaderboard: 'Peringkat',
     lesson: 'Materi',
     admin: 'Panel Admin',
-    angket: 'Angket Penelitian'
+    angket: 'Angket Penelitian',
+    tantangan: 'Misi & Tantangan',
+    'cara-bermain': 'Cara Bermain'
   };
   return titles[name] || 'DIXIGRAM';
 }
@@ -1224,6 +1229,8 @@ function renderCurrentPage() {
   if (route.name === 'progress') return renderProgressPage();
   if (route.name === 'achievements') return renderAchievementsPage();
   if (route.name === 'leaderboard') return renderLeaderboardPage();
+  if (route.name === 'tantangan' && typeof renderMissionsPage === 'function') return renderMissionsPage();
+  if (route.name === 'cara-bermain' && typeof renderHowToPlayPage === 'function') return renderHowToPlayPage();
   if (route.name === 'angket' && typeof renderSurveyPage === 'function') return renderSurveyPage();
   if (route.name === 'admin' && typeof renderAdminPage === 'function') return renderAdminPage();
   if (route.name === 'lesson') {
@@ -1309,6 +1316,7 @@ function sidebarHTML(active) {
       navItem('dashboard', 'dashboard', 'Dashboard', active) +
       navItem('grammar', 'book-open', 'Grammar', active) +
       navItem('vocabulary', 'languages', 'Vocabulary', active) +
+      navItem('tantangan', 'target', 'Misi & tantangan', active, missionBadgeCount()) +
       '<div class="nav-label">Perkembangan</div>' +
       navItem('progress', 'chart', 'Progres', active) +
       navItem('achievements', 'award', 'Pencapaian', active) +
@@ -1317,6 +1325,7 @@ function sidebarHTML(active) {
         ? '<div class="nav-label">Admin</div>' + navItem('admin', 'shield', 'Panel admin', active, adminPendingCount())
         : '') +
       '<div class="nav-label">Lainnya</div>' +
+      navItem('cara-bermain', 'help', 'Cara bermain', active) +
       '<button class="nav-item" data-action="search">' + icon('search') + ' Cari materi <span class="nav-count">Ctrl K</span></button>' +
       '<button class="nav-item" data-action="settings">' + icon('settings') + ' Pengaturan</button>' +
       '<button class="nav-item" data-action="refresh-app">' + icon('rotate') + ' Muat ulang data</button>' +
@@ -1345,13 +1354,17 @@ function sidebarHTML(active) {
   '</aside>';
 }
 
+function missionBadgeCount() {
+  return typeof missionsClaimableCount === 'function' ? missionsClaimableCount() : 0;
+}
+
 function navItem(route, iconName, label, active, badge) {
   var lessonTrack = DIXI_STATE.route.name === 'lesson' ? DIXI_STATE.route.params.track : '';
   var isActive = active === route || (active === 'lesson' && lessonTrack === route);
   return '<a class="nav-item ' + (isActive ? 'is-active' : '') + '" href="#/' + route + '" data-route="#/' + route + '"' +
     (isActive ? ' aria-current="page"' : '') + '>' +
     icon(iconName) + ' ' + label +
-    (badge !== undefined ? '<span class="nav-badge" data-admin-badge' + (badge ? '' : ' hidden') + '>' + (badge || '') + '</span>' : '') +
+    (badge !== undefined ? '<span class="nav-badge' + (route === 'tantangan' ? ' nav-badge--ok' : '') + '"' + (route === 'admin' ? ' data-admin-badge' : '') + (badge ? '' : ' hidden') + '>' + (badge || '') + '</span>' : '') +
   '</a>';
 }
 
@@ -1402,7 +1415,11 @@ function userMenuHTML(profile, guest) {
             '<button class="user-menu-item" data-route="#/admin">' + icon('shield') + ' Panel admin</button>' : '') +
         (isPending() ? '<button class="user-menu-item" data-action="check-status">' + icon('rotate') + ' Cek status validasi</button>' : '') +
         '<button class="user-menu-item" data-route="#/progress">' + icon('chart') + ' Progres saya</button>' +
+        '<button class="user-menu-item" data-route="#/achievements">' + icon('award') + ' Pencapaian</button>' +
         '<button class="user-menu-item" data-action="settings">' + icon('settings') + ' Pengaturan</button>') +
+    '<button class="user-menu-item" data-route="#/tantangan">' + icon('target') + ' Misi & tantangan' +
+      (missionBadgeCount() ? '<span class="nav-badge nav-badge--ok">' + missionBadgeCount() + '</span>' : '') + '</button>' +
+    '<button class="user-menu-item" data-route="#/cara-bermain">' + icon('help') + ' Cara bermain</button>' +
     '<button class="user-menu-item" data-action="toggle-theme">' + icon(DIXI_STATE.theme === 'dark' ? 'sun' : 'moon') + ' Ganti tema</button>' +
     '<button class="user-menu-item" data-action="refresh-app">' + icon('rotate') + ' Muat ulang data</button>' +
     (donationOn() ? '<button class="user-menu-item user-menu-item--donate" data-action="donate">' + icon('heart') + ' Donasi</button>' : '') +
@@ -1431,7 +1448,7 @@ function bottomNavHTML(active) {
     { route: 'dashboard', icon: 'dashboard', label: 'Beranda' },
     { route: 'grammar', icon: 'book-open', label: 'Grammar' },
     { route: 'vocabulary', icon: 'languages', label: 'Vocab' },
-    { route: 'progress', icon: 'chart', label: 'Progres' },
+    { route: 'tantangan', icon: 'target', label: 'Misi', dot: missionBadgeCount() },
     isAdmin()
       ? { route: 'admin', icon: 'shield', label: 'Admin', badge: adminPendingCount() }
       : { route: 'leaderboard', icon: 'trophy', label: 'Rank' }
@@ -1443,6 +1460,7 @@ function bottomNavHTML(active) {
       return '<a class="bottom-nav-item ' + (isActive ? 'is-active' : '') + '" href="#/' + item.route + '" data-route="#/' + item.route + '"' +
         (isActive ? ' aria-current="page"' : '') + '>' +
         icon(item.icon) + '<span>' + item.label + '</span>' +
+        (item.dot ? '<i class="bottom-nav-badge bottom-nav-badge--ok">' + item.dot + '</i>' : '') +
         (item.badge !== undefined ? '<i class="bottom-nav-badge" data-admin-badge' + (item.badge ? '' : ' hidden') + '>' + (item.badge || '') + '</i>' : '') + '</a>';
     }).join('') +
   '</div></nav>';
@@ -1631,8 +1649,8 @@ function openAuth(mode) {
       '<h3>Belajar dengan<br><span>ritme kamu sendiri.</span></h3>' +
       '<p>Satu akun membuka semua modul, progress permanen, XP, streak, dan papan peringkat.</p>' +
       '<ul class="auth-art-list">' +
-        '<li>' + icon('check') + ' ' + ((DIXI_STATE.boot && DIXI_STATE.boot.stats && DIXI_STATE.boot.stats.modules) || 24) + ' modul · ' +
-          ((DIXI_STATE.boot && DIXI_STATE.boot.stats && DIXI_STATE.boot.stats.questions) || 192) + ' soal latihan</li>' +
+        '<li>' + icon('check') + ' ' + ((DIXI_STATE.boot && DIXI_STATE.boot.stats && DIXI_STATE.boot.stats.modules) || 40) + ' modul · ' +
+          ((DIXI_STATE.boot && DIXI_STATE.boot.stats && DIXI_STATE.boot.stats.questions) || 320) + ' soal latihan</li>' +
         '<li>' + icon('check') + ' Grammar & vocabulary level A1–B2</li>' +
         '<li>' + icon('check') + ' XP, level, dan streak harian</li>' +
         (getSettingsPublic().requireApproval ? '<li>' + icon('shield') + ' Akun divalidasi admin agar komunitas tetap aman</li>' : '') +
@@ -1833,6 +1851,14 @@ function openSettings() {
             var on = DIXI_STATE.textSize === opt[0];
             return '<button type="button" class="segmented-item ' + (on ? 'is-active' : '') + '" role="radio" aria-checked="' + on + '" data-action="text-size" data-size="' + opt[0] + '">' +
               '<span class="seg-aa seg-aa--' + opt[0] + '">Aa</span>' + opt[1] + '</button>';
+          }).join('') +
+        '</div></div>' +
+      '<div class="settings-row settings-row--stack"><div class="settings-row-main"><strong>Efek kaca</strong><span>Penuh = tampilan kaca buram yang modern. Ringan = lebih hemat baterai untuk ponsel lama.</span></div>' +
+        '<div class="segmented" role="radiogroup" aria-label="Efek kaca">' +
+          [['full', 'Penuh', 'sparkles'], ['lite', 'Ringan', 'bolt']].map(function (opt) {
+            var on = glassMode() === opt[0];
+            return '<button type="button" class="segmented-item ' + (on ? 'is-active' : '') + '" role="radio" aria-checked="' + on + '" data-action="glass-mode" data-mode="' + opt[0] + '">' +
+              icon(opt[2]) + opt[1] + '</button>';
           }).join('') +
         '</div></div>' +
       '<div class="settings-row"><div class="settings-row-main"><strong>Tema</strong><span>Mode gelap atau terang.</span></div>' + themeSwitchHTML() + '</div>' +
@@ -2083,7 +2109,7 @@ function openUpsell(reason, moduleTitle) {
       '<div class="confirm-copy">' + esc(text) + '</div>' +
     '</div>' +
     '<div class="access-list" style="margin:18px 0 0;">' +
-      '<li>' + icon('check') + ' ' + ((DIXI_STATE.boot && DIXI_STATE.boot.stats && DIXI_STATE.boot.stats.modules) || 24) + ' modul · ' + ((DIXI_STATE.boot && DIXI_STATE.boot.stats && DIXI_STATE.boot.stats.questions) || 192) + ' soal</li>' +
+      '<li>' + icon('check') + ' ' + ((DIXI_STATE.boot && DIXI_STATE.boot.stats && DIXI_STATE.boot.stats.modules) || 40) + ' modul · ' + ((DIXI_STATE.boot && DIXI_STATE.boot.stats && DIXI_STATE.boot.stats.questions) || 320) + ' soal</li>' +
       '<li>' + icon('check') + ' XP, level, streak, dan pencapaian</li>' +
       '<li>' + icon('check') + ' Progres tersimpan di akun</li>' +
     '</div>',
@@ -2171,6 +2197,21 @@ function setTheme(theme) {
   var menuTheme = document.querySelector('.user-menu-item[data-action="toggle-theme"]');
   if (menuTheme) menuTheme.innerHTML = icon(DIXI_STATE.theme === 'dark' ? 'sun' : 'moon') + ' Ganti tema';
   updateThemeControls();
+}
+
+function glassMode() {
+  return document.documentElement.getAttribute('data-glass') === 'lite' ? 'lite' : 'full';
+}
+
+function setGlassMode(mode) {
+  var next = mode === 'lite' ? 'lite' : 'full';
+  document.documentElement.setAttribute('data-glass', next);
+  try { localStorage.setItem('dixigram:glass', next); } catch (err) { /* abaikan */ }
+  document.querySelectorAll('[data-action="glass-mode"]').forEach(function (btn) {
+    var on = btn.getAttribute('data-mode') === next;
+    btn.classList.toggle('is-active', on);
+    btn.setAttribute('aria-checked', String(on));
+  });
 }
 
 function setTextSize(size) {
@@ -2481,6 +2522,7 @@ function bindGlobalEvents() {
     }
     if (action === 'goal-option') { handleGoalOption(actionEl); return; }
     if (action === 'text-size') { setTextSize(actionEl.getAttribute('data-size')); return; }
+    if (action === 'glass-mode') { setGlassMode(actionEl.getAttribute('data-mode')); return; }
     if (action === 'change-password') { openChangePassword(); return; }
     if (action === 'refresh-app') { manualRefresh(); return; }
     if (action === 'donate') { closeLandingMenu(); openDonation(); return; }
@@ -2534,6 +2576,7 @@ function bindGlobalEvents() {
       return;
     }
 
+    if (typeof handlePlayAction === 'function' && handlePlayAction(action, actionEl, event)) return;
     if (typeof handleSurveyAction === 'function' && handleSurveyAction(action, actionEl, event)) return;
     if (typeof handleViewAction === 'function' && handleViewAction(action, actionEl, event)) return;
     if (typeof handleAdminAction === 'function' && handleAdminAction(action, actionEl, event)) return;

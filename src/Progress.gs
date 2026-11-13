@@ -96,6 +96,7 @@ function buildProgressSummary_(user, session) {
     accuracyPeak: accuracyPeakFromActivity_(activity),
     perfect: perfect,
     goalDays: goalDays,
+    missionTotals: missionTotals_(user.email),
     trackStats: {
       grammar: trackStats('grammar'),
       vocabulary: trackStats('vocabulary')
@@ -206,7 +207,9 @@ function evaluateAchievements_(progress, profile, user) {
     answers: progress.answers,
     accuracy: progress.accuracyPeak,
     goalDays: progress.goalDays,
-    balanced: Math.min(grammarCompleted, 2) + Math.min(vocabCompleted, 2)
+    balanced: Math.min(grammarCompleted, 2) + Math.min(vocabCompleted, 2),
+    missions: progress.missionTotals ? progress.missionTotals.daily : 0,
+    weeklyChallenges: progress.missionTotals ? progress.missionTotals.weekly : 0
   };
 
   return getAchievementMeta_().map(function (a) {

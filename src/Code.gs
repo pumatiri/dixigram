@@ -8,7 +8,7 @@
 
 const DIXI = Object.freeze({
   APP_NAME: 'DIXIGRAM',
-  VERSION: '1.4.0',
+  VERSION: '1.5.0',
   TIMEZONE: 'Asia/Jakarta',
 
   // URL publik aplikasi (mis. GitHub Pages). Dipakai untuk tautan di email
@@ -122,6 +122,7 @@ function setupDixigram() {
   const ss = getDatabase_();
   getSecret_();
   getSettings_();
+  getMissionSheet_(true);
   const url = ss.getUrl();
   Logger.log('Database DIXIGRAM siap: ' + url);
   Logger.log('Admin terdaftar di konfigurasi: ' + (getConfiguredAdminEmails_().join(', ') || '(belum ada)'));
@@ -302,7 +303,8 @@ function buildBootstrap_(session) {
     achievementCatalog: getAchievementMeta_(),
     leaderboard: buildLeaderboard_(session),
     wordOfDay: getWordOfDay_(),
-    survey: surveyPublic_()
+    survey: surveyPublic_(),
+    missions: buildMissions_(session)
   };
 
   if (session.role === 'admin') {

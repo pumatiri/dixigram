@@ -3,7 +3,8 @@
  * File: Content2.gs
  *
  * 6 modul grammar + 6 modul vocabulary baru, sehingga setiap track
- * berisi 12 modul: 3 modul untuk tiap level A1, A2, B1, dan B2.
+ * berisi 12 modul. Sejak v1.5 ditambah 16 modul lagi di Content3.gs
+ * (total 40 modul: 5 grammar + 5 vocabulary per level A1–B2).
  * Modul di file ini otomatis digabung dengan Content.gs saat dipakai.
  */
 
